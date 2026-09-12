@@ -2,7 +2,7 @@
 
 A package contains plugin.wasm and plugin.json (id, version, abi=1, hosts, config_schema). The deployment pins the WASM SHA-256. Host imports are `extism:host/user.call`, taking and returning pointers to Extism JSON memory. Exports `describe`, `validate_config`, `run` return Extism status 0 or error 1.
 
-Run input: {abi:1, source, run, config, state, previous_revision}. Exports return {status:"no_change"} or {status:"candidate", state, metadata}. The host buffers candidate operations until snapshot commit. State is opaque JSON, default maximum 1 MiB. No-change and failure discard pending state.
+Run input: {abi:1, source, run, config, state, previous_revision}. Exports return {status:"no_change"} or {status:"candidate", state, metadata, tags:[]}. The host buffers candidate operations until snapshot commit. State is opaque JSON, default maximum 1 MiB. No-change and failure discard pending state.
 
 Host request: {op, path?, handle?, data?, offset?, limit?, url?, method?, headers?, body?, size?, sha256?}. Host response: {error?, handle?, data?, size?, sha256?, status?, headers?, entries?}. Byte fields use base64 JSON encoding. Each data chunk is at most 1 MiB. Error means the operation failed; plugins must propagate errors.
 
@@ -11,3 +11,5 @@ Operations: http (response body staged, handle returned); create; read; write (a
 HTTP targets must satisfy both descriptor hosts and source hosts. Redirects are reauthorized. Downloads and writes share a cumulative staging quota. Host cancellation applies to network and WASM calls. Plugins cannot directly use Extism HTTP or filesystem access. Describe/config validation are read-only and have no host capabilities.
 
 Revision snapshots contain files/, artifacts/, revision.json. Revision records include id, source, parent, created_at, plugin identity, state, metadata, files, artifacts, changes. The snapshot ID is stored in the catalog, not recursively in revision.json. Only complete pinned snapshots are publishable. Authorization never depends on artifact contents.
+
+Tags are optional opaque strings supplied by plugins; the manager does not interpret upstream metadata to derive tags. Changes are recorded separately for files and artifacts.

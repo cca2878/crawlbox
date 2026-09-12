@@ -1,0 +1,96 @@
+package app_test
+
+import (
+	"context"
+	"errors"
+	"example.org/crawler/manager/internal/app"
+	"example.org/crawler/manager/internal/catalog"
+	"example.org/crawler/manager/internal/config"
+	"example.org/crawler/manager/internal/kopia"
+	rt "example.org/crawler/manager/internal/runtime"
+	"example.org/crawler/manager/internal/testutil"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+type lostAcknowledgement struct{ kopia.Backend }
+
+func (k lostAcknowledgement) Create(ctx context.Context, dir, source, id string) (kopia.Snapshot, error) {
+	s, e := k.Backend.Create(ctx, dir, source, id)
+	if e != nil {
+		return s, e
+	}
+	return s, errors.New("injected lost snapshot acknowledgement")
+}
+func TestRecoverSnapshotAfterLostAcknowledgement(t *testing.T) {
+	wasm := os.Getenv("FIXTURE_WASM")
+	if wasm == "" {
+		t.Skip("FIXTURE_WASM required")
+	}
+	k := testutil.Kopia(t)
+	b, e := os.ReadFile(wasm)
+	if e != nil {
+		t.Fatal(e)
+	}
+	c := config.Config{DataDir: t.TempDir(), Credentials: "unused", KopiaConfig: k.Config, Sources: []config.Source{{ID: "recovery", Plugin: wasm, SHA256: rt.Sum(b), Config: map[string]any{"files": map[string]string{"a": "committed only in snapshot"}}}}}
+	if e = c.Validate(); e != nil {
+		t.Fatal(e)
+	}
+	s, e := catalog.Open(filepath.Join(c.DataDir, "catalog.sqlite"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer s.Close()
+	a, e := app.New(context.Background(), c, s, lostAcknowledgement{k})
+	if e != nil {
+		t.Fatal(e)
+	}
+	id, e := a.Trigger("recovery")
+	if e != nil {
+		t.Fatal(e)
+	}
+	done := false
+	for range 200 {
+		runs, e := s.Runs(context.Background())
+		if e != nil {
+			t.Fatal(e)
+		}
+		for _, r := range runs {
+			if r.ID == id && r.Finished != nil {
+				if r.Status != "failed" {
+					t.Fatalf("expected injected failure: %+v", r)
+				}
+				done = true
+			}
+		}
+		if done {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	a.Close()
+	if !done {
+		t.Fatal("timeout")
+	}
+	if _, e = s.Revision(context.Background(), "recovery", "latest"); e == nil {
+		t.Fatal("published before acknowledgement")
+	}
+	next, e := app.New(context.Background(), c, s, k)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer next.Close()
+	rev, e := s.Revision(context.Background(), "recovery", "latest")
+	if e != nil || rev.Snapshot == "" || len(rev.Files) != 1 {
+		t.Fatalf("recovered %+v %v", rev, e)
+	}
+	if e = next.Recover(context.Background()); e != nil {
+		t.Fatal(e)
+	}
+	revisions, e := s.Revisions(context.Background(), "recovery")
+	if e != nil || len(revisions) != 1 {
+		t.Fatalf("duplicate recovery %v %+v", e, revisions)
+	}
+}

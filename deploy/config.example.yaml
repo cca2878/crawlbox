@@ -1,0 +1,22 @@
+listen: :8080
+data_dir: /data
+credentials: /config/admin.yaml
+kopia_binary: kopia
+kopia_config: /connection/repository.config
+parallel: 1
+cache_bytes: 21474836480
+sources: []
+# Install a compatible plugin package, then add a source:
+# - id: documents
+#   name: Documents
+#   plugin: /extensions/documents/plugin.wasm
+#   sha256: <actual SHA-256 of plugin.wasm>
+#   config: {}  # validated by the plugin's schema and validate_config export
+#   hosts: [downloads.example.com]
+#   schedule: "*/30 * * * *"
+#   timezone: UTC
+#   timeout: 2h
+#   memory_mb: 512
+#   staging_bytes: 107374182400
+#   state_bytes: 1048576
+#   download_parallel: 4

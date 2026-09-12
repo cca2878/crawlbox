@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Collection manager</title>
+<style>body{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:1rem;color:#182433}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:.6rem;border-bottom:1px solid #ddd}input,button{padding:.4rem}code{overflow-wrap:anywhere}section{margin:2rem 0}</style>
+<h1>Collection manager</h1>{{if .Secret}}<section>
+<h2>Copy your token</h2>
+<p>This is the only display of the secret.</p>
+<code>{{.Secret}}</code>
+</section>{{end}}<section>
+<h2>Sources</h2>
+<table>
+<tr>
+<th>Source</th>
+<th>Next run (UTC)</th>
+<th>Latest revision</th>
+<th>
+</th>
+</tr>{{range .Sources}}<tr>
+<td>{{.ID}}</td>
+<td>{{.Next}}</td>
+<td>{{.Revision}}</td>
+<td>
+<form method="post" action="/ui/sources/{{.ID}}/trigger">
+<button>Run now</button>
+</form>
+</td>
+</tr>{{end}}</table>
+</section>
+<section>
+<h2>Recent runs</h2>
+<table>
+<tr>
+<th>Source</th>
+<th>Status</th>
+<th>Started</th>
+<th>Progress / error</th>
+</tr>{{range .Runs}}<tr>
+<td>{{.Source}}</td>
+<td>{{.Status}}</td>
+<td>{{.Started}}</td>
+<td>{{.Progress}} {{.Error}}</td>
+</tr>{{end}}</table>
+</section>
+<section>
+<h2>Revision history</h2>
+<table>
+<tr>
+<th>Source</th>
+<th>Revision / parent</th>
+<th>Created</th>
+<th>File changes</th>
+</tr>{{range .History}}<tr>
+<td>{{.Source}}</td>
+<td>{{.ID}}<br>
+<small>{{.Parent}}</small>
+</td>
+<td>{{.CreatedAt}}</td>
+<td>{{len .Changes}}</td>
+</tr>{{end}}</table>
+</section>
+<section>
+<h2>Create API token</h2>
+<form method="post" action="/ui/tokens">
+<label>Name <input name="name" required maxlength="100">
+</label>
+<label>Expires (UTC, optional) <input type="datetime-local" name="expires">
+</label>
+<p>Allowed sources:</p>{{range .Sources}}<label>
+<input type="checkbox" name="sources" value="{{.ID}}">{{.ID}}</label> {{end}}<p>
+<button>Create token</button>
+</p>
+</form>
+</section>
+<section>
+<h2>API tokens</h2>
+<table>
+<tr>
+<th>Name / ID</th>
+<th>Sources</th>
+<th>Created</th>
+<th>Expires</th>
+<th>Status</th>
+<th>
+</th>
+</tr>{{range .Tokens}}<tr>
+<td>{{.Name}}<br>
+<small>{{.ID}}</small>
+</td>
+<td>{{.Sources}}</td>
+<td>{{.Created}}</td>
+<td>{{.Expires}}</td>
+<td>{{.Status}}</td>
+<td>{{if not .Revoked}}<form method="post" action="/ui/tokens/{{.ID}}/revoke">
+<button>Revoke</button>
+</form>{{end}}</td>
+</tr>{{end}}</table>
+</section>
+</html>

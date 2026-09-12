@@ -2,3 +2,14 @@
 /dist/
 /data/
 *.test
+.env
+/config.yaml
+/admin.yaml
+/deploy/config/
+/deploy/extensions/
+/deploy/manager-data/
+/deploy/client-connection/
+/deploy/server-connection/
+/deploy/server-cache/
+/deploy/repository/
+/deploy/certs/
