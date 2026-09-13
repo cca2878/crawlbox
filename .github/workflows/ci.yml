@@ -26,6 +26,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: make check test integration vuln
+      - run: sudo env KOPIA_BIN="$PWD/bin/kopia" MANAGER_BIN="$PWD/bin/manager" python3 scripts/check-entrypoints.py --distinct-users
       - run: docker build -t manager:ci .
       - run: docker build -f docker/kopia.Dockerfile -t kopia:ci .
       - run: shellcheck docker/*.sh

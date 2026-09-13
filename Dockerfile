@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 RUN mkdir -p /data /bootstrap /extensions && chown 10001:10001 /data /bootstrap /extensions
 COPY --from=build /out/manager /out/kopia /usr/local/bin/
 COPY LICENSE NOTICE /usr/local/share/licenses/manager/
+USER 10001:10001
 WORKDIR /home/manager
 EXPOSE 8080
 COPY docker/manager-entrypoint.sh /usr/local/bin/manager-entrypoint

@@ -8,7 +8,12 @@ if [[ $# -gt 1 || ${1:-server} != server ]]; then exec "${KOPIA_BINARY:-/bin/kop
 storage=${CRAWLBOX_DATA:-/data}
 shared=${CRAWLBOX_BOOTSTRAP:-/bootstrap}
 kopia=${KOPIA_BINARY:-/bin/kopia}
-mkdir -p "$storage" "$shared"
+mkdir -p "$storage"
+# Set a mode only when creating the directory; preserve existing mount permissions.
+# shellcheck disable=SC2174 # Only the shared directory itself gets this creation mode.
+mkdir -p -m 0750 "$shared"
+[[ -w $storage && -x $storage ]] || fail "Data directory is not accessible to UID $(id -u), GID $(id -g); check mount permissions"
+[[ -w $shared && -x $shared ]] || fail "Shared directory is not writable by UID $(id -u), GID $(id -g); check mount permissions"
 exec 9>"$storage/bootstrap.lock"
 flock -n 9 || fail 'Storage is already in use'
 secrets="$storage/secrets.json"
@@ -72,9 +77,9 @@ fi
 fingerprint=$(openssl x509 -in "$cert" -outform DER | sha256sum | cut -d ' ' -f1)
 temporary=$(mktemp "$shared/.connection.XXXXXX")
 printf '%s\n%s\n' "$worker" "$fingerprint" | jq -Rn '[inputs] | {password:.[0],fingerprint:.[1]}' > "$temporary"
-if [[ $(id -u) == 0 ]]; then
-    chown 10001:10001 "$shared" "$temporary"
-fi
+# Share only the worker credential with the writer's group. Repository and
+# administrator secrets remain private. A setgid directory can select the group.
+chmod 0640 "$temporary"
 sync -f "$temporary"
 mv "$temporary" "$shared/connection.json"
 sync -f "$shared"

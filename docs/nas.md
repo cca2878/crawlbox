@@ -19,7 +19,19 @@ The manager receives only a worker credential and certificate fingerprint throug
 - `bootstrap`: generated worker credential and certificate fingerprint, read-only in the manager. The Kopia entrypoint can recreate it.
 - `extensions`: installed extension packages, read-only in the manager.
 
-No `user` setting is required. The manager entrypoint starts as root only to prepare the manager volume root, then drops to UID/GID 10001; it does not recursively change existing data ownership. Kopia retains its official default user. NAS ACLs must allow the container users to access their bind mounts. Extension files must be readable by UID 10001. Keep manager and Kopia data directories separate. Do not run `docker compose down --volumes` unless intentionally destroying this deployment.
+Both images default to UID/GID `10001:10001`, so fresh Docker named volumes work without a `user` setting. These defaults are image metadata, not an entrypoint policy: Compose `user: "UID:GID"` is honored as supplied, including numeric IDs absent from the container's account database. Neither entrypoint switches identity or changes the owner, mode or ACL of an existing mount directory. Set `user` on **both** services when using a custom identity; `PUID`/`PGID` environment variables are not interpreted.
+
+The simplest custom arrangement uses the same UID/GID for both services. Different UIDs can use a common group: the shared `connection.json` is created with mode `0640` and the writer's group (or the shared directory's setgid group). Grant the manager group read/traverse access to the shared directory, using ownership, groups or your NAS ACL tools. Repository encryption and Kopia administrator secrets stay in the separate Kopia data directory with private file modes. Scripts do not require a particular directory owner or reject permissive ACLs; access granted by the deployment environment is sufficient. They do not recursively apply `chmod` or `chown`.
+
+For bind mounts, grant the chosen users access to their data directories and grant the manager read access to extensions and the shared handoff. Existing files also need appropriate access; setting the parent directory's owner alone does not migrate them. Keep manager and Kopia data directories separate. Do not run `docker compose down --volumes` unless intentionally destroying this deployment.
+
+For example, set the following on both services, substituting your actual numeric IDs:
+
+```yaml
+user: "1026:100"
+```
+
+Default named volumes and custom bind mounts use the same scripts. Direct binary deployments continue to use `manager -config /path/to/config.yaml` under the invoking OS user and do not use these entrypoints or any container UID convention.
 
 For Synology SSD/HDD placement, keep `compose.yaml`, `.env` and `extensions/` in your SSD Docker project directory. Replace the manager volume mount with `/volume2/crawlbox/manager:/data`, the Kopia data mount with `/volume2/crawlbox/kopia:/data`, and both bootstrap mounts with `./bootstrap:/bootstrap` (retain `:ro` in the manager). Replace the extensions mount with `./extensions:/extensions:ro`. Adjust `/volume2/crawlbox` to your actual large-array shared-folder path. Create the four directories before starting. The manager's full current trees and archive cache also consume space, so placing only the Kopia repository on HDD would leave substantial data on SSD.
 
@@ -27,7 +39,7 @@ For Synology SSD/HDD placement, keep `compose.yaml`, `.env` and `extensions/` in
 
 An empty installation starts successfully but does not collect anything. Install compatible packages and configure sources separately; no business-specific extension is bundled.
 
-For convenient NAS file management, replace the `extensions` named-volume mount with `./extensions:/extensions:ro`, create that directory in the Compose project directory and unpack packages there. Allow UID 10001 to read/traverse the files. Copy the generated configuration out:
+For convenient NAS file management, replace the `extensions` named-volume mount with `./extensions:/extensions:ro`, create that directory in the Compose project directory and unpack packages there. Allow the configured manager identity to read/traverse the files. Copy the generated configuration out:
 
 ```sh
 docker compose cp manager:/data/config.yaml ./config.yaml
@@ -36,7 +48,7 @@ docker compose cp manager:/data/config.yaml ./config.yaml
 Edit its `sources` using `deploy/config.example.yaml` as the schema example. Pin the actual WASM SHA-256, use `/extensions/.../plugin.wasm`, grant exact network hosts and choose a schedule. Source IDs must remain stable. To install the edited config without modifying the generated volume permissions, the image contains a shell:
 
 ```sh
-docker compose exec --user 10001:10001 -T manager sh -c 'cat > /data/config.yaml' < config.yaml
+docker compose exec -T manager sh -c 'cat > /data/config.yaml' < config.yaml
 docker compose restart manager
 ```
 
@@ -49,7 +61,7 @@ docker compose ps
 docker compose logs --tail=100 manager kopia
 ```
 
-Upgrade by changing `CRAWLBOX_VERSION` once for both images. When upgrading from v0.2.0 or v0.3.0, stop the old project first with `docker compose down` (without `--volumes`) before applying the new Compose; remove the old initializer container with `--remove-orphans` when bringing up the new project. Retain all volume names and mount paths. The scripts reuse existing secrets, certificates and history, and remove the obsolete generated `/data/start-server.sh`. Back up before upgrading; downgrading to the old non-root server may require restoring file ownership. Configuration is generated only when absent, so custom sources remain intact. Back up the management database consistently (stop the manager for a filesystem copy), server secrets/configuration and the Kopia repository. The shared handoff is sensitive even though it is reconstructible.
+Upgrade by changing `CRAWLBOX_VERSION` once for both images. When upgrading from v0.2.0 or v0.3.0, stop the old project first with `docker compose down` (without `--volumes`) before applying the new Compose; remove the old initializer container with `--remove-orphans` when bringing up the new project. Retain all volume names and mount paths. The scripts reuse existing secrets, certificates and history, and remove the obsolete generated `/data/start-server.sh`. Back up before upgrading. Earlier versions ran Kopia as root; grant the new configured identity access to existing repository files, `secrets.json`, the private key, connection files and shared directory before starting. This is a one-time deployment permission migration; the entrypoint does not take ownership automatically. Configuration is generated only when absent, so custom sources remain intact. Back up the management database consistently (stop the manager for a filesystem copy), server secrets/configuration and the Kopia repository. The shared handoff is sensitive even though it is reconstructible.
 
 Existing manually initialized deployments should retain their original Compose layout; `compose.manual.yaml` is provided for them. Automatic initialization is intended for new volumes, not in-place migration of existing manual paths.
 
