@@ -22,6 +22,8 @@ The deployment uses two images: `crawlbox` for the manager and `crawlbox-kopia`,
 
 Named volumes hold manager configuration/catalog, the Kopia repository and server secrets, the shared connection handoff, and installed extensions. Manager defaults to UID/GID 10001; the Kopia wrapper inherits the official image identity (root in the pinned version). Compose `user:` can override the identity; entrypoints do not change users or existing mount ownership. Named volumes work with the image defaults; bind mounts must grant access to the chosen identity. Keep these volumes when recreating containers. First-start preparation preserves existing credentials and configuration; restarting does not reset the administrator. See [NAS deployment and operations](docs/nas.md).
 
+For direct Linux binary or systemd deployment, see [standalone deployment](docs/standalone.md). Runtime does not require container entrypoints or a fixed OS identity.
+
 For an existing manually initialized deployment, retain your existing Compose file or use [deploy/compose.manual.yaml](deploy/compose.manual.yaml). The automatic deployment uses a different volume layout and does not migrate an existing repository automatically.
 
 ## Interfaces
