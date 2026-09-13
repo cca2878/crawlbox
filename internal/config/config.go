@@ -13,15 +13,22 @@ import (
 	"time"
 )
 
+type KopiaUIProxy struct {
+	Listen          string `yaml:"listen"`
+	Target          string `yaml:"target"`
+	FingerprintFile string `yaml:"fingerprint_file"`
+}
+
 type Config struct {
-	Listen      string   `yaml:"listen"`
-	DataDir     string   `yaml:"data_dir"`
-	Credentials string   `yaml:"credentials"`
-	KopiaBinary string   `yaml:"kopia_binary"`
-	KopiaConfig string   `yaml:"kopia_config"`
-	CacheBytes  int64    `yaml:"cache_bytes"`
-	Parallel    int      `yaml:"parallel"`
-	Sources     []Source `yaml:"sources"`
+	KopiaUIProxy KopiaUIProxy `yaml:"kopia_ui_proxy"`
+	Listen       string       `yaml:"listen"`
+	DataDir      string       `yaml:"data_dir"`
+	Credentials  string       `yaml:"credentials"`
+	KopiaBinary  string       `yaml:"kopia_binary"`
+	KopiaConfig  string       `yaml:"kopia_config"`
+	CacheBytes   int64        `yaml:"cache_bytes"`
+	Parallel     int          `yaml:"parallel"`
+	Sources      []Source     `yaml:"sources"`
 }
 type Source struct {
 	ID               string         `yaml:"id"`

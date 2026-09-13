@@ -14,7 +14,8 @@ COPY --from=build /out/manager /out/kopia /usr/local/bin/
 COPY LICENSE NOTICE /usr/local/share/licenses/manager/
 USER 10001:10001
 WORKDIR /home/manager
-EXPOSE 8080
+ENV KOPIA_UI_PROXY_LISTEN=:8081 KOPIA_UI_PROXY_TARGET=https://kopia:51515 KOPIA_UI_PROXY_PIN_FILE=/bootstrap/connection.json
+EXPOSE 8080 8081
 COPY docker/manager-entrypoint.sh /usr/local/bin/manager-entrypoint
 ENTRYPOINT ["/usr/local/bin/manager-entrypoint"]
 CMD ["serve-auto"]

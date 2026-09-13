@@ -9,6 +9,13 @@
 <p>This is the only display of the secret.</p>
 <code>{{.Secret}}</code>
 </section>{{end}}<section>
+{{if .KopiaUIProxy}}
+<h2>Kopia Web UI proxy</h2>
+<p>Status: {{if .KopiaUIProxy.Enabled}}enabled{{else}}disabled{{end}}. Access through the separate proxy port using your Kopia account.</p>
+<form method="post" action="/ui/kopia-ui-proxy">
+{{if .KopiaUIProxy.Enabled}}<button name="enabled" value="false">Disable proxy</button>{{else}}<button name="enabled" value="true">Enable proxy</button>{{end}}
+</form>
+{{end}}
 <h2>Sources</h2>
 <table>
 <tr>

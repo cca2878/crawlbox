@@ -10,6 +10,7 @@ import (
 	"errors"
 	"example.org/crawler/manager/internal/app"
 	"example.org/crawler/manager/internal/catalog"
+	"example.org/crawler/manager/internal/kopiaui"
 	"example.org/crawler/manager/internal/model"
 	rt "example.org/crawler/manager/internal/runtime"
 	"example.org/crawler/manager/internal/wire"
@@ -33,9 +34,10 @@ type Credentials struct {
 	PasswordHash string `yaml:"password_hash"`
 }
 type Server struct {
-	App         *app.App
-	Credentials Credentials
-	mu          sync.Mutex
+	KopiaUIProxy *kopiaui.Proxy
+	App          *app.App
+	Credentials  Credentials
+	mu           sync.Mutex
 }
 type authKey struct{}
 
@@ -90,6 +92,7 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/", s.ui)
 		r.Post("/sources/{source}/trigger", s.trigger)
 		r.Post("/tokens", s.createToken)
+		r.Post("/kopia-ui-proxy", s.toggleKopiaUIProxy)
 		r.Post("/tokens/{token}/revoke", s.revoke)
 	})
 	return r
@@ -431,7 +434,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, secret string) {
 		views = append(views, tokenView{t, status})
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = uiTemplate.Execute(w, map[string]any{"Secret": secret, "Sources": sources, "History": history, "Runs": runs, "Tokens": views})
+	_ = uiTemplate.Execute(w, map[string]any{"KopiaUIProxy": s.KopiaUIProxy, "Secret": secret, "Sources": sources, "History": history, "Runs": runs, "Tokens": views})
 }
 func (s *Server) ui(w http.ResponseWriter, r *http.Request) { s.render(w, r, "") }
 func (s *Server) trigger(w http.ResponseWriter, r *http.Request) {
@@ -524,4 +527,26 @@ func (s *Server) trimCache(keep string) {
 			total -= it.size
 		}
 	}
+}
+
+func (s *Server) toggleKopiaUIProxy(w http.ResponseWriter, r *http.Request) {
+	if s.KopiaUIProxy == nil {
+		http.NotFound(w, r)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1024)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", 400)
+		return
+	}
+	value := r.PostForm.Get("enabled")
+	if value != "true" && value != "false" {
+		http.Error(w, "invalid enabled value", 400)
+		return
+	}
+	if err := s.KopiaUIProxy.SetEnabled(r.Context(), value == "true"); err != nil {
+		failure(w)
+		return
+	}
+	http.Redirect(w, r, "/ui/", http.StatusSeeOther)
 }

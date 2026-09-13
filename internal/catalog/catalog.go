@@ -46,6 +46,7 @@ func Open(path string) (*Store, error) {
  CREATE INDEX IF NOT EXISTS revisions_source ON revisions(source,created);
  CREATE TABLE IF NOT EXISTS heads(source TEXT PRIMARY KEY, revision TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, body TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value INTEGER NOT NULL);
  CREATE TABLE IF NOT EXISTS tokens(id TEXT PRIMARY KEY, digest BLOB NOT NULL, body TEXT NOT NULL);`)
 	if e != nil {
 		db.Close()
@@ -301,4 +302,18 @@ func (s *Store) Revoke(ctx context.Context, id string) error {
 	bts, _ := json.Marshal(t)
 	_, e := s.DB.ExecContext(ctx, "UPDATE tokens SET body=? WHERE id=?", string(bts), id)
 	return e
+}
+
+// BoolSetting reads management settings; they are not part of business snapshots.
+func (s *Store) BoolSetting(ctx context.Context, key string) (bool, error) {
+	var value bool
+	err := s.DB.QueryRowContext(ctx, "SELECT value FROM settings WHERE key=?", key).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return value, err
+}
+func (s *Store) SetBoolSetting(ctx context.Context, key string, value bool) error {
+	_, err := s.DB.ExecContext(ctx, "INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", key, value)
+	return err
 }

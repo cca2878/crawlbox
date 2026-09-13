@@ -6,6 +6,7 @@ import (
 	"example.org/crawler/manager/internal/catalog"
 	"example.org/crawler/manager/internal/config"
 	"example.org/crawler/manager/internal/kopia"
+	"example.org/crawler/manager/internal/kopiaui"
 	rt "example.org/crawler/manager/internal/runtime"
 	"example.org/crawler/manager/internal/web"
 	"flag"
@@ -13,6 +14,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -118,7 +120,40 @@ func runServer(path string, firstSetup bool) error {
 	if e = a.Start(); e != nil {
 		return e
 	}
-	srv := &http.Server{Addr: c.Listen, Handler: (&web.Server{App: a, Credentials: creds}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
+
+	// Container defaults are independent of the business Kopia CLI connection.
+	pc := c.KopiaUIProxy
+	if pc.Listen == "" {
+		pc.Listen = os.Getenv("KOPIA_UI_PROXY_LISTEN")
+	}
+	if pc.Target == "" {
+		pc.Target = os.Getenv("KOPIA_UI_PROXY_TARGET")
+	}
+	if pc.FingerprintFile == "" {
+		pc.FingerprintFile = os.Getenv("KOPIA_UI_PROXY_PIN_FILE")
+	}
+	var proxy *kopiaui.Proxy
+	if pc.Listen != "" {
+		proxy, e = kopiaui.New(ctx, pc, store)
+		if e != nil {
+			return e
+		}
+		defer proxy.Close()
+		listener, err := net.Listen("tcp", pc.Listen)
+		if err != nil {
+			return fmt.Errorf("listen for Kopia UI proxy: %w", err)
+		}
+		proxyServer := &http.Server{Handler: proxy, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
+		defer proxyServer.Close()
+		go func() {
+			if err := proxyServer.Serve(listener); err != nil && err != http.ErrServerClosed {
+				slog.Error("Kopia UI proxy listener stopped")
+				stop()
+			}
+		}()
+		slog.Info("Kopia UI proxy listening", "address", pc.Listen, "enabled", proxy.Enabled())
+	}
+	srv := &http.Server{Addr: c.Listen, Handler: (&web.Server{App: a, Credentials: creds, KopiaUIProxy: proxy}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)

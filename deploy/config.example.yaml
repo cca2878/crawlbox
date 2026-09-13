@@ -20,3 +20,10 @@ sources: []
 #   staging_bytes: 107374182400
 #   state_bytes: 1048576
 #   download_parallel: 4
+
+# Optional, separate Kopia Web UI proxy listener. Initially disabled; enable in /ui/.
+# kopia_ui_proxy:
+#   listen: :8081
+#   target: https://kopia:51515
+#   fingerprint_file: /bootstrap/connection.json # JSON with a fingerprint field
+# Omit fingerprint_file for HTTPS with a system-trusted certificate.

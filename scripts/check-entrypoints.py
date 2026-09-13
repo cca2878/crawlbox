@@ -3,6 +3,8 @@
 import argparse
 import base64
 import json
+import http.cookiejar
+import re
 import os
 from pathlib import Path
 import socket
@@ -65,7 +67,7 @@ with tempfile.TemporaryDirectory(prefix='crawlbox-entrypoints-') as directory:
         os.chown(storage, 0, 0)
         os.chown(shared, 21001, 21000)
     mount_metadata = {path: (path.stat().st_uid, path.stat().st_gid, path.stat().st_mode) for path in (manager, storage, shared)}
-    server_port, web_port = port(), port()
+    server_port, web_port, proxy_port = port(), port(), port()
     common = dict(os.environ, KOPIA_BINARY=KOPIA, MANAGER_BINARY=MANAGER,
                   CRAWLBOX_BOOTSTRAP=str(shared), KOPIA_CHECK_FOR_UPDATES='false')
     server_env = dict(common, CRAWLBOX_DATA=str(storage), KOPIA_LISTEN=f'https://127.0.0.1:{server_port}')
@@ -79,7 +81,8 @@ with tempfile.TemporaryDirectory(prefix='crawlbox-entrypoints-') as directory:
     config = dict(listen=f'127.0.0.1:{web_port}', data_dir=str(manager),
                   credentials=str(manager / 'admin.yaml'), kopia_binary=KOPIA,
                   kopia_config=str(manager / 'connection/repository.config'),
-                  parallel=1, cache_bytes=21474836480, sources=[])
+                  parallel=1, cache_bytes=21474836480, sources=[],
+                  kopia_ui_proxy=dict(listen=f'127.0.0.1:{proxy_port}', target=f'https://127.0.0.1:{server_port}', fingerprint_file=str(shared / 'connection.json')))
     (manager / 'config.yaml').write_text(json.dumps(config))
     if args.distinct_users:
         os.chown(manager / 'config.yaml', 21001, 21000)
@@ -119,6 +122,23 @@ with tempfile.TemporaryDirectory(prefix='crawlbox-entrypoints-') as directory:
         except urllib.error.HTTPError as error:
             return error.code, error.read().decode()
 
+    def proxy_request(secret=''):
+        headers = {}
+        if secret:
+            headers['Authorization'] = 'Basic ' + base64.b64encode(f'admin:{secret}'.encode()).decode()
+        endpoint = f'http://127.0.0.1:{proxy_port}'
+        browser = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        try:
+            with browser.open(urllib.request.Request(endpoint + '/', headers=headers), timeout=2) as response:
+                html = response.read().decode()
+            token = re.search(r'name="kopia-csrf-token" content="([^"]+)"', html)
+            assert token, 'Kopia UI did not provide its CSRF token'
+            headers['X-Kopia-Csrf-Token'] = token.group(1)
+            with browser.open(urllib.request.Request(endpoint + '/api/v1/repo/status', headers=headers), timeout=2) as response:
+                return response.status
+        except urllib.error.HTTPError as error:
+            return error.code
+
     try:
         start('manager')  # Exercise waiting for missing credentials/server.
         start('kopia')
@@ -127,7 +147,12 @@ with tempfile.TemporaryDirectory(prefix='crawlbox-entrypoints-') as directory:
         assert request('/ui/setup', body)[0] == 201
         wait(lambda: request(authenticated=True)[0] == 200, processes)
         assert request('/api/v1/sources')[0] == 401
+        assert proxy_request() == 503
+        assert request('/ui/kopia-ui-proxy', b'enabled=true', authenticated=True)[0] == 200
+        assert proxy_request() == 401
         secrets = (storage / 'secrets.json').read_bytes()
+        assert proxy_request(json.loads(secrets)['server']) == 200
+        assert proxy_request(password) == 401
         cert = (storage / 'server.crt').read_bytes()
         credentials = (manager / 'admin.yaml').read_bytes()
         client_config = manager / 'connection/repository.config'
@@ -145,6 +170,9 @@ with tempfile.TemporaryDirectory(prefix='crawlbox-entrypoints-') as directory:
         assert (storage / 'secrets.json').read_bytes() == secrets
         assert (storage / 'server.crt').read_bytes() == cert
         assert (manager / 'admin.yaml').read_bytes() == credentials
+        assert proxy_request(json.loads(secrets)['server']) == 200
+        assert request('/ui/kopia-ui-proxy', b'enabled=false', authenticated=True)[0] == 200
+        assert proxy_request(json.loads(secrets)['server']) == 503
         snapshots = json.loads(subprocess.check_output(client_cli + ['snapshot', 'list', '--json'], stderr=logs, **manager_identity))
         assert len(snapshots) == 1
         stop()
