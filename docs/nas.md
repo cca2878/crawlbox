@@ -1,6 +1,6 @@
 # NAS deployment
 
-Download `deploy/compose.yaml` from the release you deploy. It contains exactly two services. Set `CRAWLBOX_VERSION` in the Compose environment (or an adjacent `.env` file) to a release that publishes both `crawlbox` and `crawlbox-kopia`. Both images always use the same tag; the wrapper does not have an independent release version. Import the project into the NAS container manager and start it, or run `docker compose up -d`. This layout is pending its first release; v0.3.0 and older do not publish the paired images.
+Download `deploy/compose.yaml` from the release you deploy. It contains exactly two services. Set `CRAWLBOX_VERSION` in the Compose environment (or an adjacent `.env` file) to a release that publishes both `crawlbox` and `crawlbox-kopia`. Both images always use the same tag; the wrapper does not have an independent release version. Import the project into the NAS container manager and start it, or run `docker compose up -d`. This layout requires v0.4.0 or later; v0.3.0 and older do not publish the paired images.
 
 Open `http://NAS-IP:8080/ui/` and create the administrator (password: 12–72 bytes). This is a one-time setup page: the first valid submission creates the administrator; subsequent submissions cannot replace it. Finish setup on a trusted LAN before opening access beyond it. Cross-origin POSTs are rejected. The page becomes available after internal storage is connected. Once setup completes, the service switches to Basic-authenticated UI.
 

@@ -37,7 +37,7 @@ See [public API](docs/api.md) and [operations](docs/operations.md). Tokens autho
 
 ## Releases
 
-Each version tag builds and verifies both architectures before publishing the application image to GHCR. The build does not fetch or reference any external plugin repository. A bundled generic fixture provides protocol and lifecycle integration coverage.
+Each version tag builds and verifies both architectures before publishing the manager and thin Kopia wrapper images to GHCR with the same tag. The build does not fetch or reference any external plugin repository. A bundled generic fixture provides protocol and lifecycle integration coverage.
 
 ## License
 
