@@ -37,3 +37,9 @@ See [public API](docs/api.md) and [operations](docs/operations.md). Tokens autho
 ## Releases
 
 Each version tag builds and verifies both architectures before publishing the application image to GHCR. The build does not fetch or reference any external plugin repository. A bundled generic fixture provides protocol and lifecycle integration coverage.
+
+## License
+
+Original project source code, tests, documentation and configuration are licensed under [Apache License 2.0](LICENSE) (`Apache-2.0`). See [NOTICE](NOTICE). Third-party dependencies and bundled components retain their respective licenses and attribution requirements.
+
+The container includes the project LICENSE and NOTICE in `/usr/local/share/licenses/manager/`.
