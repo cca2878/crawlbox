@@ -16,16 +16,13 @@ Requires Go 1.26.6, Linux, make and network access for locked module downloads. 
 
 ## Deploy
 
-The image includes `manager` and Kopia CLI v0.23.1. `deploy/compose.yaml` uses the matching official Kopia Server image. Set `MANAGER_IMAGE` to a fixed versioned GHCR image after publishing your repository; do not use `latest`.
+For a new NAS deployment, download [deploy/compose.yaml](deploy/compose.yaml), import it into your NAS container manager, and start the project. Open `http://NAS-IP:8080/ui/` to create the first administrator. No environment variables, manually generated certificates, password hashes or pre-created directories are required. Initialize the administrator on your trusted LAN before exposing the service elsewhere.
 
-1. Prepare the bind directories in `deploy/compose.yaml`. The manager runs as UID/GID 10001; its data directory must be writable and its configuration, credentials and client connection readable by that user.
-2. Initialize the server repository using the official CLI with `repository create filesystem --path /repository`. Keep its connection file in `/app/config`, and create a repository-server user such as `worker@manager` with `server user add`. Repository password and UI password are distinct from API tokens.
-3. Supply a TLS certificate and key at the Compose paths, start Kopia, and connect the manager CLI with `repository connect server --url https://kopia:51515 --server-cert-fingerprint <SHA256> --override-username worker --override-hostname manager`. Run this using the manager image's `kopia` entrypoint override, mounting the client connection directory writable during setup. Supply the repository-server user's password through `KOPIA_PASSWORD`; the resulting connection file is a secret. The steady-state manager mounts it read-only.
-4. Copy `deploy/config.example.yaml` to the mounted config directory. Install compatible plugin packages into the read-only extension mount; register source entries with their actual WASM digests and exact authorized hosts. Plugin-specific setup belongs to each plugin package.
-5. Generate a bcrypt password hash with `manager hash-password`, reading the password from stdin. Put `username` and `password_hash` in `/config/admin.yaml`; do not put the password in command arguments.
-6. Start the manager. It verifies plugin digests, descriptors and configuration, recovers the snapshot catalog, then enables schedules. Visit `/ui/` using the administrator credential to trigger collection and create API tokens.
+The two containers use the same versioned image: one runs the manager, the other runs the bundled fixed-version Kopia server. The server has no published ports and lives on an internal Docker network. The manager alone publishes port 8080 and has outbound network access for collection. Internal communication uses authenticated TLS with a pinned, automatically generated certificate.
 
-The supplied port mappings bind to loopback. Use an HTTPS reverse proxy for browser/client access across machines; preserve Host, Origin and Sec-Fetch-Site for the standard cross-origin protection middleware. No write operation uses GET. Configuration changes require restart. An OS file lock prevents two managers sharing one data directory.
+Named volumes hold manager configuration/catalog, the Kopia repository and server secrets, the shared connection bootstrap, and installed extensions. Both containers run as UID/GID 10001. Do not remove these volumes when recreating containers. First-start setup preserves existing credentials and configuration; restarting does not reset the administrator. See [NAS deployment and operations](docs/nas.md).
+
+For an existing manually initialized deployment, retain your existing Compose file or use [deploy/compose.manual.yaml](deploy/compose.manual.yaml). The automatic deployment uses a different volume layout and does not migrate an existing repository automatically.
 
 ## Interfaces
 

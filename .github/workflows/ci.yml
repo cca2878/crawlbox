@@ -28,6 +28,7 @@ jobs:
       - run: make check test integration vuln
       - run: docker build -t manager:ci .
       - run: printf 'ci-password' | docker run --rm -i manager:ci hash-password
+      - run: python3 scripts/check-compose.py
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: verify

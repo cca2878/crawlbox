@@ -30,6 +30,23 @@ func main() {
 }
 func run() error {
 	defer rt.CloseCache(context.Background())
+	if len(os.Args) > 1 && os.Args[1] == "reset-password" {
+		path := "/data/admin.yaml"
+		if len(os.Args) > 3 {
+			return fmt.Errorf("usage: manager reset-password [credentials-file]")
+		}
+		if len(os.Args) == 3 {
+			path = os.Args[2]
+		}
+		if err := resetPassword(path, os.Stdin); err != nil {
+			return err
+		}
+		fmt.Println("Administrator password updated. Restart the manager to apply it.")
+		return nil
+	}
+	if len(os.Args) > 1 && (os.Args[1] == "serve-auto" || os.Args[1] == "kopia-server") {
+		return managed(os.Args[1])
+	}
 	if len(os.Args) > 1 && os.Args[1] == "hash-password" {
 		b, e := io.ReadAll(io.LimitReader(os.Stdin, 74))
 		if e != nil {

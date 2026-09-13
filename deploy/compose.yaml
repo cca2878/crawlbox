@@ -1,33 +1,36 @@
+name: crawlbox
+
 services:
   manager:
-    image: ${MANAGER_IMAGE:?set a fixed manager image tag}
+    image: ${CRAWLBOX_IMAGE:-ghcr.io/cca2878/crawlbox:v0.2.0}
+    command: [serve-auto]
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:8080"
+      - "${CRAWLBOX_PORT:-8080}:8080"
     volumes:
-      - ./config:/config:ro
-      - ./extensions:/extensions:ro
-      - ./manager-data:/data
-      - ./client-connection:/connection:ro
-    depends_on:
-      - kopia
+      - manager-data:/data
+      - bootstrap:/bootstrap:ro
+      - extensions:/extensions:ro
+    networks: [default, storage]
+    depends_on: [kopia]
+
   kopia:
-    image: kopia/kopia:0.23.1
+    # Same versioned image, running the bundled fixed-version Kopia server.
+    image: ${CRAWLBOX_IMAGE:-ghcr.io/cca2878/crawlbox:v0.2.0}
+    command: [kopia-server]
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:51515:51515"
-    command:
-      - server
-      - start
-      - --address=https://0.0.0.0:51515
-      - --tls-cert-file=/certs/server.crt
-      - --tls-key-file=/certs/server.key
-    environment:
-      KOPIA_PASSWORD: ${KOPIA_PASSWORD:?set repository password}
-      KOPIA_SERVER_USERNAME: ${KOPIA_SERVER_USERNAME:-admin}
-      KOPIA_SERVER_PASSWORD: ${KOPIA_SERVER_PASSWORD:?set Kopia UI password}
     volumes:
-      - ./repository:/repository
-      - ./server-connection:/app/config
-      - ./server-cache:/app/cache
-      - ./certs:/certs:ro
+      - kopia-data:/data
+      - bootstrap:/bootstrap
+    networks: [storage]
+
+networks:
+  default: {}
+  storage:
+    internal: true
+
+volumes:
+  manager-data:
+  kopia-data:
+  bootstrap:
+  extensions:
