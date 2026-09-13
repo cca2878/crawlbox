@@ -15,11 +15,11 @@ import (
 	"testing"
 	"time"
 
-	"example.org/crawler/manager/internal/catalog"
-	"example.org/crawler/manager/internal/config"
-	rt "example.org/crawler/manager/internal/runtime"
-	"example.org/crawler/manager/internal/testutil"
-	"example.org/crawler/manager/internal/web"
+	"github.com/cca2878/crawlbox/internal/catalog"
+	"github.com/cca2878/crawlbox/internal/config"
+	rt "github.com/cca2878/crawlbox/internal/runtime"
+	"github.com/cca2878/crawlbox/internal/testutil"
+	"github.com/cca2878/crawlbox/internal/web"
 	"go.yaml.in/yaml/v3"
 )
 

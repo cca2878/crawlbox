@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"example.org/crawler/manager/internal/app"
-	"example.org/crawler/manager/internal/catalog"
+	"github.com/cca2878/crawlbox/internal/app"
+	"github.com/cca2878/crawlbox/internal/catalog"
 	"golang.org/x/crypto/bcrypt"
 )
 

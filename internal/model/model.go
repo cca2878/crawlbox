@@ -2,7 +2,7 @@ package model
 
 import (
 	"encoding/json"
-	"example.org/crawler/manager/internal/wire"
+	"github.com/cca2878/crawlbox/internal/wire"
 	"time"
 )
 

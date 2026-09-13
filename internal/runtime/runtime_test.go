@@ -2,8 +2,8 @@ package runtime
 
 import (
 	"context"
-	"example.org/crawler/manager/internal/config"
-	"example.org/crawler/manager/internal/wire"
+	"github.com/cca2878/crawlbox/internal/config"
+	"github.com/cca2878/crawlbox/internal/wire"
 	"net/http"
 	"net/http/httptest"
 	"net/url"

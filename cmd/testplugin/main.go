@@ -5,7 +5,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"example.org/crawler/manager/internal/wire"
+	"github.com/cca2878/crawlbox/internal/wire"
 	"github.com/extism/go-pdk"
 )
 

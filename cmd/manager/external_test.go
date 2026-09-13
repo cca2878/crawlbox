@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"example.org/crawler/manager/internal/config"
-	"example.org/crawler/manager/internal/testutil"
-	"example.org/crawler/manager/internal/web"
+	"github.com/cca2878/crawlbox/internal/config"
+	"github.com/cca2878/crawlbox/internal/testutil"
+	"github.com/cca2878/crawlbox/internal/web"
 	"go.yaml.in/yaml/v3"
 	"golang.org/x/crypto/bcrypt"
 )

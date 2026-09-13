@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"example.org/crawler/manager/internal/fileutil"
-	"example.org/crawler/manager/internal/web"
+	"github.com/cca2878/crawlbox/internal/fileutil"
+	"github.com/cca2878/crawlbox/internal/web"
 	"go.yaml.in/yaml/v3"
 	"golang.org/x/crypto/bcrypt"
 )

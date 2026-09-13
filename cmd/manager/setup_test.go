@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"example.org/crawler/manager/internal/web"
+	"github.com/cca2878/crawlbox/internal/web"
 	"golang.org/x/crypto/bcrypt"
 )
 

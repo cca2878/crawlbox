@@ -3,7 +3,7 @@ package catalog
 import (
 	"context"
 	"encoding/json"
-	"example.org/crawler/manager/internal/model"
+	"github.com/cca2878/crawlbox/internal/model"
 	"os"
 	"path/filepath"
 	"strings"

@@ -15,11 +15,11 @@ import (
 	"testing"
 	"time"
 
-	"example.org/crawler/manager/internal/app"
-	"example.org/crawler/manager/internal/catalog"
-	"example.org/crawler/manager/internal/config"
-	"example.org/crawler/manager/internal/kopiaui"
-	"example.org/crawler/manager/internal/web"
+	"github.com/cca2878/crawlbox/internal/app"
+	"github.com/cca2878/crawlbox/internal/catalog"
+	"github.com/cca2878/crawlbox/internal/config"
+	"github.com/cca2878/crawlbox/internal/kopiaui"
+	"github.com/cca2878/crawlbox/internal/web"
 	"golang.org/x/crypto/bcrypt"
 )
 

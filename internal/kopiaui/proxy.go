@@ -17,8 +17,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"example.org/crawler/manager/internal/catalog"
-	"example.org/crawler/manager/internal/config"
+	"github.com/cca2878/crawlbox/internal/catalog"
+	"github.com/cca2878/crawlbox/internal/config"
 )
 
 const setting = "kopia_ui_proxy_enabled"

@@ -2,7 +2,7 @@ package kopia_test
 
 import (
 	"context"
-	"example.org/crawler/manager/internal/testutil"
+	"github.com/cca2878/crawlbox/internal/testutil"
 	"os"
 	"path/filepath"
 	"testing"

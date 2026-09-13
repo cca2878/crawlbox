@@ -1,4 +1,4 @@
-module example.org/crawler/manager
+module github.com/cca2878/crawlbox
 
 go 1.26.6
 
