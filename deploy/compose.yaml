@@ -1,10 +1,27 @@
 name: crawlbox
 
 services:
+  init-storage:
+    image: ${CRAWLBOX_IMAGE:-ghcr.io/cca2878/crawlbox:v0.3.0}
+    command: [init-storage]
+    # Only the one-shot initializer needs root to prepare bind-mount permissions.
+    user: "0:0"
+    restart: "no"
+    network_mode: none
+    volumes:
+      - kopia-data:/data
+      - manager-data:/manager-data
+      - bootstrap:/bootstrap
+
   manager:
-    image: ${CRAWLBOX_IMAGE:-ghcr.io/cca2878/crawlbox:v0.2.0}
+    image: ${CRAWLBOX_IMAGE:-ghcr.io/cca2878/crawlbox:v0.3.0}
     command: [serve-auto]
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     ports:
       - "${CRAWLBOX_PORT:-8080}:8080"
     volumes:
@@ -12,17 +29,32 @@ services:
       - bootstrap:/bootstrap:ro
       - extensions:/extensions:ro
     networks: [default, storage]
-    depends_on: [kopia]
+    environment:
+      CRAWLBOX_LOG_LEVEL: info
+    depends_on:
+      init-storage:
+        condition: service_completed_successfully
+      kopia:
+        condition: service_started
 
   kopia:
-    # Same versioned image, running the bundled fixed-version Kopia server.
-    image: ${CRAWLBOX_IMAGE:-ghcr.io/cca2878/crawlbox:v0.2.0}
-    command: [kopia-server]
+    image: kopia/kopia:0.23.1
+    entrypoint: [/bin/sh, /data/start-server.sh]
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      KOPIA_CACHE_DIRECTORY: /data/cache
+      KOPIA_LOG_DIR: /data/logs
     volumes:
       - kopia-data:/data
-      - bootstrap:/bootstrap
     networks: [storage]
+    depends_on:
+      init-storage:
+        condition: service_completed_successfully
 
 networks:
   default: {}

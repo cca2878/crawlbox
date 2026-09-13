@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"github.com/robfig/cron/v3"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -60,6 +61,7 @@ func New(ctx context.Context, c config.Config, store *catalog.Store, backend kop
 			return nil, fmt.Errorf("load %s: %w", s.ID, e)
 		}
 		a.Sources[s.ID] = Loaded{s, d, b}
+		slog.Info("source loaded", "source", s.ID, "plugin", d.ID)
 		identities[s.ID] = d.ID
 	}
 	if e := a.Recover(ctx); e != nil {
@@ -91,13 +93,20 @@ func (a *App) Start() error {
 			continue
 		}
 		id := id
-		entry, e := a.cron.AddFunc("CRON_TZ="+s.Config.Timezone+" "+s.Config.Schedule, func() { _, _ = a.Trigger(id) })
+		entry, e := a.cron.AddFunc("CRON_TZ="+s.Config.Timezone+" "+s.Config.Schedule, func() {
+			if _, err := a.Trigger(id); err != nil {
+				slog.Warn("scheduled collection could not be queued", "source", id)
+			}
+		})
 		if e != nil {
 			return e
 		}
 		a.entries[id] = entry
 	}
 	a.cron.Start()
+	for id := range a.entries {
+		slog.Info("source scheduled", "source", id, "next_run", a.Next(id))
+	}
 	return nil
 }
 func (a *App) Close()                   { a.cancel(); <-a.cron.Stop().Done(); a.wg.Wait() }
@@ -122,6 +131,7 @@ func (a *App) Trigger(source string) (string, error) {
 		return "", e
 	}
 	a.active[source] = r.ID
+	slog.Info("collection queued", "source", source, "run", r.ID)
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
@@ -133,6 +143,20 @@ func (a *App) Trigger(source string) (string, error) {
 func (a *App) perform(r model.Run) {
 	ctx, cancel := context.WithTimeout(a.ctx, a.Sources[r.Source].Config.Timeout)
 	defer cancel()
+	heartbeatDone := make(chan struct{})
+	defer close(heartbeatDone)
+	go func(source, run string, started time.Time) {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatDone:
+				return
+			case <-ticker.C:
+				slog.Info("collection still active", "source", source, "run", run, "elapsed", time.Since(started))
+			}
+		}
+	}(r.Source, r.ID, r.Started)
 	var e error
 	defer func() {
 		if p := recover(); p != nil {
@@ -144,7 +168,17 @@ func (a *App) perform(r model.Run) {
 		}
 		now := time.Now().UTC()
 		r.Finished = &now
-		_ = a.Store.SaveRun(context.Background(), r)
+		if err := a.Store.SaveRun(context.Background(), r); err != nil {
+			slog.Error("could not persist final run status", "source", r.Source, "run", r.ID)
+		}
+		level := slog.LevelInfo
+		if e != nil {
+			level = slog.LevelError
+		}
+		slog.Log(context.Background(), level, "collection finished", "source", r.Source, "run", r.ID, "status", r.Status, "duration", now.Sub(r.Started))
+		if e != nil {
+			slog.Error("collection failed; details available in authenticated UI", "source", r.Source, "run", r.ID)
+		}
 	}()
 	select {
 	case a.slots <- struct{}{}:
@@ -153,7 +187,11 @@ func (a *App) perform(r model.Run) {
 		e = ctx.Err()
 		return
 	}
-	stage := func(status string) error { r.Status = status; return a.Store.SaveRun(ctx, r) }
+	stage := func(status string) error {
+		r.Status = status
+		slog.Info("collection stage", "source", r.Source, "run", r.ID, "stage", status)
+		return a.Store.SaveRun(ctx, r)
+	}
 	if e = stage("running"); e != nil {
 		return
 	}
@@ -187,7 +225,11 @@ func (a *App) perform(r model.Run) {
 		art = filepath.Join(previous, "artifacts")
 		files = filepath.Join(previous, "files")
 	}
-	h := rt.NewHost(s.Config, s.Descriptor, objects, files, art, func(p string) { r.Progress = p; _ = a.Store.SaveRun(ctx, r) })
+	h := rt.NewHost(s.Config, s.Descriptor, objects, files, art, func(p string) {
+		r.Progress = p
+		_ = a.Store.SaveRun(ctx, r)
+		slog.Debug("plugin progress updated", "source", r.Source, "run", r.ID)
+	})
 	defer h.Close()
 	conf, _ := json.Marshal(s.Config.Config)
 	in := wire.Input{ABI: 1, Source: r.Source, Run: r.ID, Config: conf, State: prev.State, PreviousRevision: prev.ID}
@@ -247,6 +289,7 @@ func (a *App) perform(r model.Run) {
 		return
 	}
 	r.Status = "succeeded"
+	slog.Info("revision committed", "source", r.Source, "run", r.ID, "revision", rev.ID, "files", len(rev.Files), "artifacts", len(rev.Artifacts))
 }
 func (a *App) block(id string) { a.mu.Lock(); a.blocked[id] = true; a.mu.Unlock() }
 func writeFile(p string, b []byte) error {
@@ -449,6 +492,7 @@ func (a *App) Current(ctx context.Context, r model.Revision) (string, error) {
 	return dst, nil
 }
 func (a *App) Recover(ctx context.Context) error {
+	slog.Info("history recovery started")
 	snaps, e := a.Backend.List(ctx)
 	if e != nil {
 		return e
@@ -495,6 +539,7 @@ func (a *App) Recover(ctx context.Context) error {
 		}
 		pending[id] = r
 	}
+	recovered := len(pending)
 	for len(pending) > 0 {
 		advanced := false
 		for id, r := range pending {
@@ -515,5 +560,6 @@ func (a *App) Recover(ctx context.Context) error {
 			return errors.New("snapshot history has a gap or fork")
 		}
 	}
+	slog.Info("history recovery completed", "recovered_revisions", recovered)
 	return nil
 }

@@ -40,6 +40,7 @@ def wait_for(check):
     raise RuntimeError("Compose readiness timed out")
 
 try:
+    run("pull", "kopia")
     run("up", "-d", "--pull", "never")
     wait_for(lambda: "创建管理员账号" in request()[1])
     body = urllib.parse.urlencode({"username": "admin", "password": password, "confirm": password}).encode()
@@ -51,18 +52,31 @@ try:
     container = run("ps", "-q", "kopia").strip()
     ports = json.loads(subprocess.check_output(["docker", "inspect", container], text=True))[0]["NetworkSettings"]["Ports"]
     assert not any(ports.values())
+    inspect = json.loads(subprocess.check_output(["docker", "inspect", container], text=True))[0]
+    assert inspect["Config"]["Image"] == "kopia/kopia:0.23.1"
+    initializers = run("ps", "-a", "-q", "init-storage").strip()
+    state = json.loads(subprocess.check_output(["docker", "inspect", initializers], text=True))[0]["State"]
+    assert state["Status"] == "exited" and state["ExitCode"] == 0
     before = run("exec", "-T", "kopia", "sha256sum", "/data/secrets.json")
-    run("restart")
+    run("restart", "kopia", "manager")
     wait_for(lambda: request(authenticated=True)[0] == 200)
     assert request()[0] == 401
     assert before == run("exec", "-T", "kopia", "sha256sum", "/data/secrets.json")
-    assert password not in run("logs", "--no-color")
+    logs = run("logs", "--no-color")
+    assert password not in logs
+    for event in ["manager listening", "history recovery completed", "no sources configured"]:
+        assert event in logs, event
     new_password = "integration-only-reset-admin"
     subprocess.run(compose + ["exec", "-T", "manager", "manager", "reset-password"], input=new_password, text=True, check=True, capture_output=True)
     run("restart", "manager")
     password = new_password
     wait_for(lambda: request(authenticated=True)[0] == 200)
     assert request()[0] == 401
-    print("Compose first administrator, internal Kopia, API isolation and restart passed")
+    # Recreate the whole project without deleting volumes: initialization must be repeatable.
+    run("down")
+    run("up", "-d", "--pull", "never")
+    wait_for(lambda: request(authenticated=True)[0] == 200)
+    assert before == run("exec", "-T", "kopia", "sha256sum", "/data/secrets.json")
+    print("Compose official Kopia, one-shot init, logs, first setup, reset and recreate passed")
 finally:
     subprocess.run(compose + ["down", "--volumes"], check=True)

@@ -14,10 +14,12 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -103,6 +105,7 @@ func (o Options) Server(ctx context.Context) (*exec.Cmd, error) {
 	var s secrets
 	b, err := os.ReadFile(secretPath)
 	if errors.Is(err, os.ErrNotExist) {
+		slog.Info("creating storage credentials")
 		// Refuse to invent new passwords for an existing repository.
 		entries, e := os.ReadDir(filepath.Join(o.Data, "repository"))
 		if e == nil && len(entries) > 0 {
@@ -120,7 +123,7 @@ func (o Options) Server(ctx context.Context) (*exec.Cmd, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(s.Repository) != 64 || len(s.Worker) != 64 || len(s.Server) != 64 {
+	if !validSecret(s.Repository) || !validSecret(s.Worker) || !validSecret(s.Server) {
 		return nil, errors.New("invalid bootstrap secrets")
 	}
 	cfg := filepath.Join(o.Data, "repository.config")
@@ -133,6 +136,7 @@ func (o Options) Server(ctx context.Context) (*exec.Cmd, error) {
 		} else if e != nil && !errors.Is(e, os.ErrNotExist) {
 			return nil, e
 		}
+		slog.Info("initializing storage repository", "operation", verb)
 		if err = o.run(ctx, cfg, s.Repository, "repository", verb, "filesystem", "--path", repo, "--cache-directory", filepath.Join(o.Data, "cache")); err != nil {
 			return nil, err
 		}
@@ -148,6 +152,7 @@ func (o Options) Server(ctx context.Context) (*exec.Cmd, error) {
 	key := filepath.Join(o.Data, "server.key")
 	// Use standard-library certificate generation; the client pins its SHA-256.
 	if _, err = os.Stat(cert); errors.Is(err, os.ErrNotExist) {
+		slog.Info("generating internal TLS certificate")
 		if err = certificate(cert, key); err != nil {
 			return nil, err
 		}
@@ -187,7 +192,12 @@ func (o Options) Connect(ctx context.Context) error {
 	if err := os.MkdirAll(filepath.Dir(cfg), 0700); err != nil {
 		return err
 	}
+	attempts := 0
 	for {
+		attempts++
+		if attempts == 1 || attempts%15 == 0 {
+			slog.Info("waiting for Kopia readiness", "attempt", attempts)
+		}
 		if ctx.Err() != nil {
 			return fmt.Errorf("waiting for Kopia: %w", ctx.Err())
 		}
@@ -239,4 +249,47 @@ func certificate(certPath, keyPath string) error {
 		return err
 	}
 	return AtomicWrite(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+}
+
+func validSecret(s string) bool  { b, err := hex.DecodeString(s); return err == nil && len(b) == 32 }
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
+
+// Initialize prepares a startup script consumed by the official Kopia image.
+// It exposes only the worker connection to the manager's shared volume.
+func (o Options) Initialize(ctx context.Context, managerData string) error {
+	cmd, err := o.Server(ctx)
+	if err != nil {
+		return err
+	}
+	var script strings.Builder
+	script.WriteString("#!/bin/sh\nset -eu\n")
+	for _, entry := range cmd.Env {
+		if strings.HasPrefix(entry, "KOPIA_PASSWORD=") || strings.HasPrefix(entry, "KOPIA_SERVER_PASSWORD=") {
+			key, value, _ := strings.Cut(entry, "=")
+			script.WriteString("export " + key + "=" + shellQuote(value) + "\n")
+		}
+	}
+	script.WriteString("exec /bin/kopia")
+	for _, arg := range cmd.Args[1:] {
+		script.WriteString(" " + shellQuote(arg))
+	}
+	script.WriteString("\n")
+	if err = AtomicWrite(filepath.Join(o.Data, "start-server.sh"), []byte(script.String())); err != nil {
+		return err
+	}
+	if managerData != "" {
+		if err = os.MkdirAll(managerData, 0700); err != nil {
+			return err
+		}
+		if os.Geteuid() == 0 {
+			// Only adjust the mount roots and generated handoff; never walk the repository.
+			for _, p := range []string{managerData, o.Shared, filepath.Join(o.Shared, "connection.json")} {
+				if err = os.Chown(p, 10001, 10001); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	slog.Info("storage initialization completed")
+	return nil
 }

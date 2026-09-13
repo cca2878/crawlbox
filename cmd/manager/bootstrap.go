@@ -27,6 +27,12 @@ func managed(mode string) error {
 	}
 	defer lock.Close()
 	options := bootstrap.Options{Binary: envDefault("KOPIA_BINARY", "kopia"), Data: data, Shared: shared}
+	if mode == "init-storage" {
+		options.URL = "https://0.0.0.0:51515"
+		initCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		return options.Initialize(initCtx, envDefault("CRAWLBOX_MANAGER_DATA", "/manager-data"))
+	}
 	if mode == "kopia-server" {
 		options.URL = envDefault("KOPIA_LISTEN", "https://0.0.0.0:51515")
 		initCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
@@ -57,6 +63,7 @@ func managed(mode string) error {
 	if err != nil {
 		return err
 	}
+	slog.Info("internal Kopia connection ready")
 	// The bootstrap lock is released when exec replaces this process. The normal
 	// manager acquires its own data lock before opening the catalog.
 	binary, err := os.Executable()

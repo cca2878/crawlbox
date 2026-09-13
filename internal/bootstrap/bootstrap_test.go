@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -110,5 +112,51 @@ func TestExclusiveLock(t *testing.T) {
 	if second, err := Lock(dir); err == nil {
 		second.Close()
 		t.Fatal("duplicate lock accepted")
+	}
+}
+
+func TestInitializeOfficialServerScript(t *testing.T) {
+	binary := os.Getenv("KOPIA_BIN")
+	if binary == "" {
+		t.Skip("KOPIA_BIN required")
+	}
+	binary, err := filepath.Abs(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	o := Options{binary, filepath.Join(root, "server's data"), filepath.Join(root, "shared"), "https://0.0.0.0:51515"}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err = o.Initialize(ctx, ""); err != nil {
+		t.Fatal(err)
+	}
+	script, err := os.ReadFile(filepath.Join(o.Data, "start-server.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(script), "exec /bin/kopia") || strings.Contains(string(script), binary) {
+		t.Fatal("script does not use official binary")
+	}
+	check := exec.Command("sh", "-n", filepath.Join(o.Data, "start-server.sh"))
+	if err = check.Run(); err != nil {
+		t.Fatal(err)
+	}
+	shared, err := os.ReadFile(filepath.Join(o.Shared, "connection.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(o.Data, "secrets.json"))
+	var s secrets
+	json.Unmarshal(b, &s)
+	if strings.Contains(string(shared), s.Repository) || strings.Contains(string(shared), s.Server) {
+		t.Fatal("server secrets exposed to manager")
+	}
+	if err = o.Initialize(ctx, ""); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(filepath.Join(o.Data, "secrets.json"))
+	if string(b) != string(after) {
+		t.Fatal("secrets changed")
 	}
 }

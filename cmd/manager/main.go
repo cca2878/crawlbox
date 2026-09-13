@@ -23,6 +23,14 @@ import (
 )
 
 func main() {
+	level := slog.LevelInfo
+	if value := os.Getenv("CRAWLBOX_LOG_LEVEL"); value != "" {
+		if err := level.UnmarshalText([]byte(value)); err != nil {
+			fmt.Fprintln(os.Stderr, "invalid CRAWLBOX_LOG_LEVEL (use debug, info, warn or error)")
+			os.Exit(1)
+		}
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level})))
 	if e := run(); e != nil {
 		slog.Error("manager stopped", "error", e)
 		os.Exit(1)
@@ -44,7 +52,7 @@ func run() error {
 		fmt.Println("Administrator password updated. Restart the manager to apply it.")
 		return nil
 	}
-	if len(os.Args) > 1 && (os.Args[1] == "serve-auto" || os.Args[1] == "kopia-server") {
+	if len(os.Args) > 1 && (os.Args[1] == "serve-auto" || os.Args[1] == "kopia-server" || os.Args[1] == "init-storage") {
 		return managed(os.Args[1])
 	}
 	if len(os.Args) > 1 && os.Args[1] == "hash-password" {
@@ -61,6 +69,7 @@ func run() error {
 	}
 	path := flag.String("config", "config.yaml", "configuration file")
 	flag.Parse()
+	slog.Info("loading manager configuration", "path", *path)
 	c, e := config.Load(*path)
 	if e != nil {
 		return e
@@ -87,6 +96,7 @@ func run() error {
 	defer store.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	slog.Info("initializing sources and recovering history", "sources", len(c.Sources))
 	a, e := app.New(ctx, c, store, &kopia.CLI{Binary: c.KopiaBinary, Config: c.KopiaConfig})
 	if e != nil {
 		return e
@@ -102,9 +112,13 @@ func run() error {
 		defer cancel()
 		_ = srv.Shutdown(shutdown)
 	}()
-	slog.Info("manager listening", "address", c.Listen)
+	slog.Info("manager listening", "address", c.Listen, "sources", len(c.Sources))
+	if len(c.Sources) == 0 {
+		slog.Info("no sources configured; waiting for source configuration")
+	}
 	e = srv.ListenAndServe()
 	if e == http.ErrServerClosed {
+		slog.Info("manager shutdown completed")
 		return nil
 	}
 	return e
