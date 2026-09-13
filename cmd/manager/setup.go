@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"example.org/crawler/manager/internal/bootstrap"
+	"example.org/crawler/manager/internal/fileutil"
 	"example.org/crawler/manager/internal/web"
 	"go.yaml.in/yaml/v3"
 	"golang.org/x/crypto/bcrypt"
@@ -31,7 +31,7 @@ func ensureAdministrator(ctx context.Context, data string) error {
 		return err
 	}
 	done := make(chan struct{})
-	srv := &http.Server{Addr: envDefault("CRAWLBOX_SETUP_LISTEN", ":8080"), Handler: setupHandler(data, func() { close(done) }), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	srv := &http.Server{Addr: setupAddress(), Handler: setupHandler(data, func() { close(done) }), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	result := make(chan error, 1)
 	go func() { result <- srv.ListenAndServe() }()
 	slog.Info("open /ui/ to create the first administrator", "address", srv.Addr)
@@ -97,7 +97,7 @@ func setupHandler(data string, completed func()) http.Handler {
 			http.Error(w, "无法创建账号。", 500)
 			return
 		}
-		if err = bootstrap.AtomicWrite(credentials, b); err != nil {
+		if err = fileutil.AtomicWrite(credentials, b); err != nil {
 			http.Error(w, "无法保存账号。", 500)
 			return
 		}
@@ -139,5 +139,12 @@ func resetPassword(path string, input io.Reader) error {
 	if err != nil {
 		return err
 	}
-	return bootstrap.AtomicWrite(path, b)
+	return fileutil.AtomicWrite(path, b)
+}
+
+func setupAddress() string {
+	if address := os.Getenv("CRAWLBOX_SETUP_LISTEN"); address != "" {
+		return address
+	}
+	return ":8080"
 }

@@ -1,20 +1,8 @@
 name: crawlbox
 
 services:
-  init-storage:
-    image: ${CRAWLBOX_IMAGE:-ghcr.io/cca2878/crawlbox:v0.3.0}
-    command: [init-storage]
-    # Only the one-shot initializer needs root to prepare bind-mount permissions.
-    user: "0:0"
-    restart: "no"
-    network_mode: none
-    volumes:
-      - kopia-data:/data
-      - manager-data:/manager-data
-      - bootstrap:/bootstrap
-
   manager:
-    image: ${CRAWLBOX_IMAGE:-ghcr.io/cca2878/crawlbox:v0.3.0}
+    image: ${CRAWLBOX_IMAGE:-ghcr.io/cca2878/crawlbox:${CRAWLBOX_VERSION:?set a released crawlbox tag}}
     command: [serve-auto]
     restart: unless-stopped
     logging:
@@ -32,14 +20,11 @@ services:
     environment:
       CRAWLBOX_LOG_LEVEL: info
     depends_on:
-      init-storage:
-        condition: service_completed_successfully
       kopia:
         condition: service_started
 
   kopia:
-    image: kopia/kopia:0.23.1
-    entrypoint: [/bin/sh, /data/start-server.sh]
+    image: ${CRAWLBOX_KOPIA_IMAGE:-ghcr.io/cca2878/crawlbox-kopia:${CRAWLBOX_VERSION:?set the same released crawlbox tag}}
     restart: unless-stopped
     logging:
       driver: json-file
@@ -51,10 +36,8 @@ services:
       KOPIA_LOG_DIR: /data/logs
     volumes:
       - kopia-data:/data
+      - bootstrap:/bootstrap
     networks: [storage]
-    depends_on:
-      init-storage:
-        condition: service_completed_successfully
 
 networks:
   default: {}

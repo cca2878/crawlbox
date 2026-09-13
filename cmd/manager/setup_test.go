@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"example.org/crawler/manager/internal/config"
 	"example.org/crawler/manager/internal/web"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -49,15 +48,8 @@ func TestFirstAdministrator(t *testing.T) {
 	if completed != 1 {
 		t.Fatal(completed)
 	}
-	path, err := prepareConfig(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := config.Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	credentials, err := web.LoadCredentials(cfg.Credentials)
+	path := filepath.Join(dir, "admin.yaml")
+	credentials, err := web.LoadCredentials(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,9 +58,6 @@ func TestFirstAdministrator(t *testing.T) {
 	}
 	before, _ := os.ReadFile(path)
 	if err = ensureAdministrator(context.Background(), dir); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = prepareConfig(dir); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := os.ReadFile(path)

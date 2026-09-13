@@ -9,5 +9,6 @@ if [ -n "$unformatted" ]; then
   echo "$unformatted"
   exit 1
 fi
+for script in docker/*.sh; do bash -n "$script"; done
 $GO vet ./...
 $GO mod verify

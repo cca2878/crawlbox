@@ -52,8 +52,12 @@ func run() error {
 		fmt.Println("Administrator password updated. Restart the manager to apply it.")
 		return nil
 	}
-	if len(os.Args) > 1 && (os.Args[1] == "serve-auto" || os.Args[1] == "kopia-server" || os.Args[1] == "init-storage") {
-		return managed(os.Args[1])
+	if len(os.Args) > 1 && os.Args[1] == "serve-auto" {
+		data := os.Getenv("CRAWLBOX_DATA")
+		if data == "" {
+			data = "/data"
+		}
+		return runServer(filepath.Join(data, "config.yaml"), true)
 	}
 	if len(os.Args) > 1 && os.Args[1] == "hash-password" {
 		b, e := io.ReadAll(io.LimitReader(os.Stdin, 74))
@@ -69,15 +73,15 @@ func run() error {
 	}
 	path := flag.String("config", "config.yaml", "configuration file")
 	flag.Parse()
-	slog.Info("loading manager configuration", "path", *path)
-	c, e := config.Load(*path)
+	return runServer(*path, false)
+}
+func runServer(path string, firstSetup bool) error {
+	slog.Info("loading manager configuration", "path", path)
+	c, e := config.Load(path)
 	if e != nil {
 		return e
 	}
-	creds, e := web.LoadCredentials(c.Credentials)
-	if e != nil {
-		return e
-	}
+
 	if e = os.MkdirAll(c.DataDir, 0700); e != nil {
 		return e
 	}
@@ -89,13 +93,22 @@ func run() error {
 	if e = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); e != nil {
 		return fmt.Errorf("data directory in use: %w", e)
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	if firstSetup {
+		if e = ensureAdministrator(ctx, c.DataDir); e != nil {
+			return e
+		}
+	}
+	creds, e := web.LoadCredentials(c.Credentials)
+	if e != nil {
+		return e
+	}
 	store, e := catalog.Open(filepath.Join(c.DataDir, "catalog.sqlite"))
 	if e != nil {
 		return e
 	}
 	defer store.Close()
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 	slog.Info("initializing sources and recovering history", "sources", len(c.Sources))
 	a, e := app.New(ctx, c, store, &kopia.CLI{Binary: c.KopiaBinary, Config: c.KopiaConfig})
 	if e != nil {

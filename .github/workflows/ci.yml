@@ -27,6 +27,8 @@ jobs:
           cache: true
       - run: make check test integration vuln
       - run: docker build -t manager:ci .
+      - run: docker build -f docker/kopia.Dockerfile -t kopia:ci .
+      - run: shellcheck docker/*.sh
       - run: printf 'ci-password' | docker run --rm -i manager:ci hash-password
       - run: python3 scripts/check-compose.py
   publish:
@@ -58,3 +60,10 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+      - uses: docker/build-push-action@v7.3.0
+        with:
+          context: .
+          file: docker/kopia.Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ghcr.io/${{ github.repository }}-kopia:${{ github.ref_name }}
