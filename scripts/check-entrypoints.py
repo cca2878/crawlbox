@@ -5,6 +5,7 @@ import base64
 import json
 import http.cookiejar
 import re
+import shutil
 import os
 from pathlib import Path
 import socket
@@ -66,6 +67,21 @@ with tempfile.TemporaryDirectory(prefix='crawlbox-entrypoints-') as directory:
     if args.root_server:
         os.chown(storage, 0, 0)
         os.chown(shared, 21001, 21000)
+    # The checkout (including runner home ancestors) may be private. Copy only
+    # test executables/scripts into our controlled fixture before dropping UID.
+    runtime = base / 'runtime'
+    runtime.mkdir(mode=0o750)
+    inputs = [(Path(KOPIA), 'kopia'), (Path(MANAGER), 'manager')]
+    inputs += [(ROOT / f'docker/{role}-entrypoint.sh', f'{role}-entrypoint.sh') for role in ('manager', 'kopia')]
+    if args.distinct_users:
+        os.chown(runtime, 0, 21000)
+    for source, name in inputs:
+        target = runtime / name
+        shutil.copyfile(source, target)
+        target.chmod(0o550)
+        if args.distinct_users:
+            os.chown(target, 0, 21000)
+    KOPIA, MANAGER = str(runtime / 'kopia'), str(runtime / 'manager')
     mount_metadata = {path: (path.stat().st_uid, path.stat().st_gid, path.stat().st_mode) for path in (manager, storage, shared)}
     server_port, web_port, proxy_port = port(), port(), port()
     common = dict(os.environ, KOPIA_BINARY=KOPIA, MANAGER_BINARY=MANAGER,
@@ -90,9 +106,9 @@ with tempfile.TemporaryDirectory(prefix='crawlbox-entrypoints-') as directory:
     logs = open(base / 'output.log', 'w+')
 
     def start(role):
-        process = subprocess.Popen(['bash', str(ROOT / f'docker/{role}-entrypoint.sh')],
+        process = subprocess.Popen(['bash', str(runtime / f'{role}-entrypoint.sh')],
                                    env=server_env if role == 'kopia' else manager_env,
-                                   stdout=logs, stderr=logs,
+                                   stdout=logs, stderr=logs, cwd=base,
                                    **(server_identity if role == 'kopia' else manager_identity))
         processes.append(process)
         return process
@@ -161,7 +177,7 @@ with tempfile.TemporaryDirectory(prefix='crawlbox-entrypoints-') as directory:
         fixture.mkdir()
         (fixture / 'example.txt').write_text('persistent history')
         client_cli = [KOPIA, '--config-file', str(client_config), '--disable-file-logging', '--no-progress']
-        subprocess.run(client_cli + ['snapshot', 'create', str(fixture)], check=True, stdout=logs, stderr=logs, **manager_identity)
+        subprocess.run(client_cli + ['snapshot', 'create', str(fixture)], check=True, stdout=logs, stderr=logs, cwd=base, **manager_identity)
         stop()
         start('kopia')
         start('manager')
@@ -173,7 +189,7 @@ with tempfile.TemporaryDirectory(prefix='crawlbox-entrypoints-') as directory:
         assert proxy_request(json.loads(secrets)['server']) == 200
         assert request('/ui/kopia-ui-proxy', b'enabled=false', authenticated=True)[0] == 200
         assert proxy_request(json.loads(secrets)['server']) == 503
-        snapshots = json.loads(subprocess.check_output(client_cli + ['snapshot', 'list', '--json'], stderr=logs, **manager_identity))
+        snapshots = json.loads(subprocess.check_output(client_cli + ['snapshot', 'list', '--json'], stderr=logs, cwd=base, **manager_identity))
         assert len(snapshots) == 1
         stop()
         # Lost derived connections and handoff are reconstructed from durable credentials.
@@ -193,8 +209,8 @@ with tempfile.TemporaryDirectory(prefix='crawlbox-entrypoints-') as directory:
             saved = path.read_bytes()
             owner = path.stat()
             path.unlink()
-            result = subprocess.run(['bash', str(ROOT / 'docker/kopia-entrypoint.sh')], env=server_env,
-                                    stdout=logs, stderr=logs, timeout=30, **server_identity)
+            result = subprocess.run(['bash', str(runtime / 'kopia-entrypoint.sh')], env=server_env,
+                                    stdout=logs, stderr=logs, timeout=30, cwd=base, **server_identity)
             assert result.returncode != 0
             assert not path.exists()
             path.write_bytes(saved)
