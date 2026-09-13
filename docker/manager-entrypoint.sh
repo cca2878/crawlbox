@@ -19,8 +19,8 @@ flock -n 9 || fail 'Manager environment is already in use'
 if [[ ! -e $storage/config.yaml ]]; then
     log 'Creating default manager configuration'
     temporary=$(mktemp "$storage/.config.XXXXXX")
-    # JSON is accepted by the application's YAML parser. Existing YAML is preserved.
-    jq -n --arg data "$storage" --arg kopia "$kopia" --arg client "$client" '{listen:":8080",data_dir:$data,credentials:($data+"/admin.yaml"),kopia_binary:$kopia,kopia_config:$client,parallel:1,cache_bytes:21474836480,sources:[]}' > "$temporary"
+    # Emit a block-style YAML mapping; JSON-quoted values safely escape paths.
+    jq -nr --arg data "$storage" --arg kopia "$kopia" --arg client "$client" '{listen:":8080",data_dir:$data,credentials:($data+"/admin.yaml"),kopia_binary:$kopia,kopia_config:$client,parallel:1,cache_bytes:21474836480,sources:[]} | to_entries[] | "\(.key): \(.value | tojson)"' > "$temporary"
     sync -f "$temporary"
     mv "$temporary" "$storage/config.yaml"
     sync -f "$storage"
