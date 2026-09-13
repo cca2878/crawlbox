@@ -77,6 +77,9 @@ fi
 fingerprint=$(openssl x509 -in "$cert" -outform DER | sha256sum | cut -d ' ' -f1)
 temporary=$(mktemp "$shared/.connection.XXXXXX")
 printf '%s\n%s\n' "$worker" "$fingerprint" | jq -Rn '[inputs] | {password:.[0],fingerprint:.[1]}' > "$temporary"
+# A root publisher can use the shared directory's group without changing the
+# directory itself. Non-root writers retain their primary or inherited setgid group.
+if [[ $(id -u) == 0 ]]; then chgrp --reference="$shared" "$temporary"; fi
 # Share only the worker credential with the writer's group. Repository and
 # administrator secrets remain private. A setgid directory can select the group.
 chmod 0640 "$temporary"

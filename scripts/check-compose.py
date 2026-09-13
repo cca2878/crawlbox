@@ -56,9 +56,9 @@ try:
     inspect = json.loads(subprocess.check_output(["docker", "inspect", container], text=True))[0]
     assert inspect["Config"]["Image"] == "kopia:ci"
     assert sorted(run("config", "--services").split()) == ["kopia", "manager"]
-    for service in ("manager", "kopia"):
+    for service, expected in (("manager", "10001"), ("kopia", "0")):
         for identity in ("Uid", "Gid"):
-            assert run("exec", "-T", service, "sh", "-c", f"sed -n '/^{identity}:/p' /proc/1/status").split()[1:] == ["10001"] * 4
+            assert run("exec", "-T", service, "sh", "-c", f"sed -n '/^{identity}:/p' /proc/1/status").split()[1:] == [expected] * 4
     before = run("exec", "-T", "kopia", "sha256sum", "/data/secrets.json")
     run("restart", "kopia", "manager")
     wait_for(lambda: request(authenticated=True)[0] == 200)

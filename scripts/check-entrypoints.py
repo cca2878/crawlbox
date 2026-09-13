@@ -18,11 +18,16 @@ KOPIA = os.environ['KOPIA_BIN']
 MANAGER = os.environ['MANAGER_BIN']
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--distinct-users', action='store_true', help='requires root; exercise different numeric users with a shared group')
+parser.add_argument('--root-server', action='store_true', help='with --distinct-users, exercise a root server and a non-root manager')
 args = parser.parse_args()
+if args.root_server and not args.distinct_users:
+    parser.error('--root-server requires --distinct-users')
 if args.distinct_users and os.geteuid() != 0:
     parser.error('--distinct-users requires root')
 manager_identity = dict(user=21001, group=21000, extra_groups=[]) if args.distinct_users else {}
 server_identity = dict(user=21002, group=21000, extra_groups=[]) if args.distinct_users else {}
+if args.root_server:
+    server_identity = dict(user=0, group=0, extra_groups=[])
 
 
 def port():
@@ -56,6 +61,9 @@ with tempfile.TemporaryDirectory(prefix='crawlbox-entrypoints-') as directory:
         for path, uid, mode in ((manager, 21001, 0o700), (storage, 21002, 0o700), (shared, 21002, 0o750)):
             os.chown(path, uid, 21000)
             path.chmod(mode)
+    if args.root_server:
+        os.chown(storage, 0, 0)
+        os.chown(shared, 21001, 21000)
     mount_metadata = {path: (path.stat().st_uid, path.stat().st_gid, path.stat().st_mode) for path in (manager, storage, shared)}
     server_port, web_port = port(), port()
     common = dict(os.environ, KOPIA_BINARY=KOPIA, MANAGER_BINARY=MANAGER,
