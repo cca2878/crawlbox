@@ -29,6 +29,7 @@ jobs:
       - run: sudo env KOPIA_BIN="$PWD/bin/kopia" MANAGER_BIN="$PWD/bin/manager" python3 scripts/check-entrypoints.py --distinct-users
       - run: sudo env KOPIA_BIN="$PWD/bin/kopia" MANAGER_BIN="$PWD/bin/manager" python3 scripts/check-entrypoints.py --distinct-users --root-server
       - run: docker build -t manager:ci .
+      - run: DOCKER_MANAGER_IMAGE=manager:ci KOPIA_BIN="$PWD/bin/kopia" go test -count=1 -run TestExternalManagerEntrypoint ./cmd/manager
       - run: docker build -f docker/kopia.Dockerfile -t kopia:ci .
       - run: shellcheck docker/*.sh
       - run: printf 'ci-password' | docker run --rm -i manager:ci hash-password

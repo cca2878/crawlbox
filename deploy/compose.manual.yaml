@@ -3,10 +3,6 @@ services:
     image: ${MANAGER_IMAGE:?set a fixed manager image tag}
     command: [-config, /config/config.yaml]
     user: "10001:10001"
-    environment:
-      KOPIA_UI_PROXY_LISTEN: ""
-      KOPIA_UI_PROXY_TARGET: ""
-      KOPIA_UI_PROXY_PIN_FILE: ""
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"

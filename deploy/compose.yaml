@@ -20,6 +20,11 @@ services:
     networks: [default, storage]
     environment:
       CRAWLBOX_LOG_LEVEL: info
+      CRAWLBOX_BOOTSTRAP: /bootstrap
+      KOPIA_URL: https://kopia:51515
+      KOPIA_UI_PROXY_LISTEN: :8081
+      KOPIA_UI_PROXY_TARGET: https://kopia:51515
+      KOPIA_UI_PROXY_PIN_FILE: /bootstrap/connection.json
     depends_on:
       kopia:
         condition: service_started

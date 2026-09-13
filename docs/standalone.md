@@ -105,7 +105,7 @@ kopia_ui_proxy:
 
 For a self-signed server certificate, the pin file contains `{"fingerprint":"REPLACE_WITH_TRUSTED_SHA256"}`. It needs no password. For a certificate trusted by the operating system, omit `fingerprint_file` and use standard CA verification. The proxy is initially disabled; enable it in the manager UI and log in using Kopia's own credentials. HTTP targets are also supported when deliberately configured.
 
-The optional `KOPIA_UI_PROXY_LISTEN`, `KOPIA_UI_PROXY_TARGET` and `KOPIA_UI_PROXY_PIN_FILE` environment variables supply defaults for empty YAML fields. Do not carry the Docker image's environment into an unrelated standalone deployment. Remove these variables if you want YAML-only configuration or standard CA verification with an empty fingerprint field.
+The optional `KOPIA_UI_PROXY_LISTEN`, `KOPIA_UI_PROXY_TARGET` and `KOPIA_UI_PROXY_PIN_FILE` environment variables supply defaults for empty YAML fields. Do not carry the bundled Compose's environment into an unrelated standalone deployment. Remove these variables if you want YAML-only configuration or standard CA verification with an empty fingerprint field.
 
 ## Verification
 
