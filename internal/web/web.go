@@ -394,7 +394,19 @@ var uiHTML string
 var uiTemplate = template.Must(template.New("ui").Parse(uiHTML))
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, secret string) {
-	type src struct{ ID, Next, Revision string }
+	page := r.URL.Query().Get("page")
+	switch page {
+	case "runs", "revisions", "tokens", "settings":
+	default:
+		page = "sources"
+	}
+	if secret != "" {
+		page = "tokens"
+	}
+	type src struct {
+		ID, Next, Revision, Status, Progress, Error string
+		Active                                      bool
+	}
 	sources := []src{}
 	history := []model.Revision{}
 	for id := range s.App.Sources {
@@ -406,7 +418,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, secret string) {
 		if revisions, e := s.App.Store.Revisions(r.Context(), id); e == nil {
 			history = append(history, revisions[:min(20, len(revisions))]...)
 		}
-		sources = append(sources, src{id, next, v.ID})
+		sources = append(sources, src{ID: id, Next: next, Revision: v.ID})
 	}
 	slices.SortFunc(sources, func(a, b src) int { return strings.Compare(a.ID, b.ID) })
 	runs, e := s.App.Store.Runs(r.Context())
@@ -414,6 +426,22 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, secret string) {
 		failure(w)
 		return
 	}
+	// Runs are newest first. Show the latest available record for each source.
+	for i := range sources {
+		for _, run := range runs {
+			if run.Source == sources[i].ID {
+				sources[i].Status = run.Status
+				sources[i].Progress = run.Progress
+				sources[i].Error = run.Error
+				switch run.Status {
+				case "queued", "running", "validating", "snapshotting", "committing":
+					sources[i].Active = true
+				}
+				break
+			}
+		}
+	}
+	slices.SortFunc(history, func(a, b model.Revision) int { return b.CreatedAt.Compare(a.CreatedAt) })
 	tokens, e := s.App.Store.Tokens(r.Context())
 	if e != nil {
 		failure(w)
@@ -434,7 +462,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, secret string) {
 		views = append(views, tokenView{t, status})
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = uiTemplate.Execute(w, map[string]any{"KopiaUIProxy": s.KopiaUIProxy, "Secret": secret, "Sources": sources, "History": history, "Runs": runs, "Tokens": views})
+	_ = uiTemplate.Execute(w, map[string]any{"Page": page, "KopiaUIProxy": s.KopiaUIProxy, "Secret": secret, "Sources": sources, "History": history, "Runs": runs, "Tokens": views})
 }
 func (s *Server) ui(w http.ResponseWriter, r *http.Request) { s.render(w, r, "") }
 func (s *Server) trigger(w http.ResponseWriter, r *http.Request) {
@@ -473,7 +501,7 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	http.Redirect(w, r, "/ui/", 303)
+	http.Redirect(w, r, "/ui/?page=tokens", http.StatusSeeOther)
 }
 
 // trimCache runs under the cache lock. Removing an opened file does not invalidate
@@ -548,5 +576,5 @@ func (s *Server) toggleKopiaUIProxy(w http.ResponseWriter, r *http.Request) {
 		failure(w)
 		return
 	}
-	http.Redirect(w, r, "/ui/", http.StatusSeeOther)
+	http.Redirect(w, r, "/ui/?page=settings", http.StatusSeeOther)
 }

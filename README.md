@@ -30,7 +30,7 @@ For an existing manually initialized deployment, retain your existing Compose fi
 
 ## Interfaces
 
-- `/ui/`: independent administrator Basic authentication; collection status, progress, failures, schedules, latest revision, trigger forms, token creation/list/revocation. It is not a Kopia file browser or repository maintenance UI.
+- `/ui/`: independent administrator Basic authentication; collection status, progress, failures, schedules, latest revision, trigger forms, token creation/list/revocation. Navigation separates sources, runs, revisions, API tokens and service settings using server-rendered pages. Native disclosure elements expand errors and management forms; no JavaScript or frontend dependencies are required. It is not a Kopia file browser or repository maintenance UI.
 - `/api/v1`: historical read-only data, using `Authorization: Bearer <token>`. It has no run, scheduler, trigger, configuration or token-management endpoints.
 
 See [public API](docs/api.md) and [operations](docs/operations.md). Tokens authorize explicitly selected source IDs, optionally expire, and display their secret only at creation. New sources are not automatically authorized. Source IDs cannot be reintroduced once retired or changed to another plugin identity.

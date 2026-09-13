@@ -1,0 +1,60 @@
+package web
+
+import (
+	"net/http/httptest"
+	"net/url"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"example.org/crawler/manager/internal/app"
+	"example.org/crawler/manager/internal/catalog"
+	"golang.org/x/crypto/bcrypt"
+)
+
+func TestUIPagesAndTokenFlow(t *testing.T) {
+	store, err := catalog.Open(filepath.Join(t.TempDir(), "catalog.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.Register(t.Context(), map[string]string{"alpha": "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte("password"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{App: &app.App{Store: store}, Credentials: Credentials{Username: "admin", PasswordHash: string(hash)}}
+	handler := server.Handler()
+	request := func(method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.SetBasicAuth("admin", "password")
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w
+	}
+	for page, heading := range map[string]string{"sources": "数据源", "runs": "运行记录", "revisions": "版本历史", "tokens": "API Token", "settings": "服务设置", "unknown": "数据源"} {
+		w := request("GET", "/ui/?page="+page, "")
+		if w.Code != 200 || !strings.Contains(w.Body.String(), "<h2>"+heading+"</h2>") || strings.Count(w.Body.String(), "<h2>") != 1 {
+			t.Fatalf("page %s: %d %s", page, w.Code, w.Body.String())
+		}
+	}
+	w := request("POST", "/ui/tokens", url.Values{"name": {"<script>test</script>"}, "sources": {"alpha"}}.Encode())
+	if w.Code != 200 || w.Header().Get("Cache-Control") != "no-store" || !strings.Contains(w.Body.String(), "请保存 Token") || strings.Contains(w.Body.String(), "<script>test</script>") || !strings.HasSuffix(strings.TrimSpace(w.Body.String()), "</html>") {
+		t.Fatalf("token response: %d %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(request("GET", "/ui/?page=tokens", "").Body.String(), "请保存 Token") {
+		t.Fatal("secret reappeared on GET")
+	}
+	tokens, err := store.Tokens(t.Context())
+	if err != nil || len(tokens) != 1 {
+		t.Fatalf("tokens: %v %v", tokens, err)
+	}
+	w = request("POST", "/ui/tokens/"+tokens[0].ID+"/revoke", "")
+	if w.Code != 303 || w.Header().Get("Location") != "/ui/?page=tokens" {
+		t.Fatalf("revoke: %d %s", w.Code, w.Header().Get("Location"))
+	}
+}

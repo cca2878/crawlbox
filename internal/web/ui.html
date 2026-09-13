@@ -1,107 +1,207 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
+<head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width">
-<title>Collection manager</title>
-<style>body{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:1rem;color:#182433}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:.6rem;border-bottom:1px solid #ddd}input,button{padding:.4rem}code{overflow-wrap:anywhere}section{margin:2rem 0}</style>
-<h1>Collection manager</h1>{{if .Secret}}<section>
-<h2>Copy your token</h2>
-<p>This is the only display of the secret.</p>
-<code>{{.Secret}}</code>
-</section>{{end}}<section>
-{{if .KopiaUIProxy}}
-<h2>Kopia Web UI proxy</h2>
-<p>Status: {{if .KopiaUIProxy.Enabled}}enabled{{else}}disabled{{end}}. Access through the separate proxy port using your Kopia account.</p>
-<form method="post" action="/ui/kopia-ui-proxy">
-{{if .KopiaUIProxy.Enabled}}<button name="enabled" value="false">Disable proxy</button>{{else}}<button name="enabled" value="true">Enable proxy</button>{{end}}
-</form>
-{{end}}
-<h2>Sources</h2>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>crawlbox · 管理界面</title>
+<style>
+body { max-width:1100px; margin:2rem auto; padding:0 1rem; font:16px/1.5 system-ui,sans-serif; color:#222; }
+nav { display:flex; flex-wrap:wrap; gap:.5rem 1.5rem; }
+nav a[aria-current="page"] { font-weight:bold; color:inherit; }
+header { padding-bottom:1rem; border-bottom:1px solid #ccc; }
+main { margin:2rem 0; }
+h3 { margin-top:2rem; }
+a { color:#245d91; }
+.table-scroll { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; }
+th,td { padding:.75rem; text-align:left; vertical-align:top; border-bottom:1px solid #ddd; }
+th { white-space:nowrap; }
+details { margin:1rem 0; }
+td details { margin:0; min-width:12rem; }
+summary,button { cursor:pointer; }
+button,input,select { font:inherit; padding:.35rem; }
+.stack { max-width:32rem; margin-top:1rem; }
+.stack label { display:block; margin-top:1rem; }
+.stack input,.stack select { display:block; width:100%; box-sizing:border-box; }
+code { overflow-wrap:anywhere; }
+footer { border-top:1px solid #ccc; padding-top:1rem; color:#555; font-size:.875rem; }
+</style>
+</head>
+<body>
+<header>
+<h1>crawlbox</h1>
+<nav aria-label="主导航">
+<a href="/ui/" {{if eq .Page "sources"}}aria-current="page"{{end}}>数据源</a>
+<a href="/ui/?page=runs" {{if eq .Page "runs"}}aria-current="page"{{end}}>运行记录</a>
+<a href="/ui/?page=revisions" {{if eq .Page "revisions"}}aria-current="page"{{end}}>版本历史</a>
+<a href="/ui/?page=tokens" {{if eq .Page "tokens"}}aria-current="page"{{end}}>API Token</a>
+<a href="/ui/?page=settings" {{if eq .Page "settings"}}aria-current="page"{{end}}>服务设置</a>
+</nav>
+</header>
+<main>
+{{if eq .Page "sources"}}
+<h2>数据源</h2>
+<p>{{len .Sources}} 个数据源。配置与调度由部署文件管理。</p>
+<div class="table-scroll">
 <table>
+<thead>
 <tr>
-<th>Source</th>
-<th>Next run (UTC)</th>
-<th>Latest revision</th>
-<th>
-</th>
-</tr>{{range .Sources}}<tr>
+<th>数据源</th>
+<th>最近状态</th>
+<th>当前版本</th>
+<th>下次运行（UTC）</th>
+<th>操作</th>
+</tr>
+</thead>
+<tbody>{{range .Sources}}
+<tr>
 <td>{{.ID}}</td>
+<td>{{if .Status}}{{.Status}}{{else}}暂无近期记录{{end}}</td>
+<td>{{if .Revision}}<a href="/ui/?page=revisions"><code>{{.Revision}}</code></a>{{else}}尚未发布{{end}}</td>
 <td>{{.Next}}</td>
-<td>{{.Revision}}</td>
 <td>
-<form method="post" action="/ui/sources/{{.ID}}/trigger">
-<button>Run now</button>
-</form>
+<form method="post" action="/ui/sources/{{.ID}}/trigger"><button>立即运行</button></form>
 </td>
-</tr>{{end}}</table>
-</section>
-<section>
-<h2>Recent runs</h2>
-<table>
+</tr>
+{{else}}
 <tr>
-<th>Source</th>
-<th>Status</th>
-<th>Started</th>
-<th>Progress / error</th>
-</tr>{{range .Runs}}<tr>
+<td colspan="5">尚未配置数据源。</td>
+</tr>
+{{end}}</tbody>
+</table>
+</div>
+<h3>运行概况</h3>
+{{range .Sources}}{{if or .Progress .Error}}
+<details {{if .Active}}open{{end}}>
+<summary>{{.ID}} · {{.Status}}</summary>
+{{if .Progress}}<p>{{.Progress}}</p>{{end}}{{if .Error}}<p>{{.Error}}</p>{{end}}</details>
+{{end}}{{end}}
+<p><a href="/ui/?page=runs">查看运行记录与错误详情</a></p>
+{{else if eq .Page "runs"}}
+<h2>运行记录</h2>
+<div class="table-scroll">
+<table>
+<thead>
+<tr>
+<th>开始时间（UTC）</th>
+<th>数据源</th>
+<th>状态</th>
+<th>进度 / 结果</th>
+</tr>
+</thead>
+<tbody>{{range .Runs}}
+<tr>
+<td>{{.Started.UTC.Format "2006-01-02 15:04:05"}}</td>
 <td>{{.Source}}</td>
 <td>{{.Status}}</td>
-<td>{{.Started}}</td>
-<td>{{.Progress}} {{.Error}}</td>
-</tr>{{end}}</table>
-</section>
-<section>
-<h2>Revision history</h2>
-<table>
+<td>{{.Progress}}
+<details>
+<summary>{{if .Error}}错误详情{{else}}运行详情{{end}}</summary>
+{{if .Error}}<p>{{.Error}}</p>{{end}}<p>运行 ID：<code>{{.ID}}</code></p>{{if .Finished}}<p>结束时间（UTC）：{{.Finished.UTC.Format "2006-01-02 15:04:05"}}</p>{{end}}</details>
+</td>
+</tr>
+{{else}}
 <tr>
-<th>Source</th>
-<th>Revision / parent</th>
-<th>Created</th>
-<th>File changes</th>
-</tr>{{range .History}}<tr>
+<td colspan="4">暂无运行记录。</td>
+</tr>
+{{end}}</tbody>
+</table>
+</div>
+{{else if eq .Page "revisions"}}
+<h2>版本历史</h2>
+<p>每个数据源最近 20 个已发布版本。完整文件浏览使用 Kopia Web UI。</p>
+<div class="table-scroll">
+<table>
+<thead>
+<tr>
+<th>发布时间（UTC）</th>
+<th>数据源</th>
+<th>版本</th>
+<th>详情</th>
+</tr>
+</thead>
+<tbody>{{range .History}}
+<tr>
+<td>{{.CreatedAt.UTC.Format "2006-01-02 15:04:05"}}</td>
 <td>{{.Source}}</td>
-<td>{{.ID}}<br>
-<small>{{.Parent}}</small>
+<td><code>{{.ID}}</code></td>
+<td>
+<details>
+<summary>{{len .Changes}} 项文件变更 · {{len .ArtifactChanges}} 项 artifact 变更</summary>
+<p>父版本：{{if .Parent}}<code>{{.Parent}}</code>{{else}}无（首个版本）{{end}}</p><p>完整文件：{{len .Files}} 个；Artifacts：{{len .Artifacts}} 个。</p></details>
 </td>
-<td>{{.CreatedAt}}</td>
-<td>{{len .Changes}}</td>
-</tr>{{end}}</table>
-</section>
-<section>
-<h2>Create API token</h2>
-<form method="post" action="/ui/tokens">
-<label>Name <input name="name" required maxlength="100">
-</label>
-<label>Expires (UTC, optional) <input type="datetime-local" name="expires">
-</label>
-<p>Allowed sources:</p>{{range .Sources}}<label>
-<input type="checkbox" name="sources" value="{{.ID}}">{{.ID}}</label> {{end}}<p>
-<button>Create token</button>
-</p>
-</form>
-</section>
-<section>
-<h2>API tokens</h2>
-<table>
+</tr>
+{{else}}
 <tr>
-<th>Name / ID</th>
-<th>Sources</th>
-<th>Created</th>
-<th>Expires</th>
-<th>Status</th>
-<th>
-</th>
-</tr>{{range .Tokens}}<tr>
-<td>{{.Name}}<br>
-<small>{{.ID}}</small>
-</td>
-<td>{{.Sources}}</td>
-<td>{{.Created}}</td>
-<td>{{.Expires}}</td>
-<td>{{.Status}}</td>
-<td>{{if not .Revoked}}<form method="post" action="/ui/tokens/{{.ID}}/revoke">
-<button>Revoke</button>
-</form>{{end}}</td>
-</tr>{{end}}</table>
-</section>
+<td colspan="4">暂无已发布版本。</td>
+</tr>
+{{end}}</tbody>
+</table>
+</div>
+{{else if eq .Page "tokens"}}
+<h2>API Token</h2>
+{{if .Secret}}
+<section aria-labelledby="secret-heading">
+<h3 id="secret-heading">请保存 Token</h3>
+<p>明文仅在本次创建后显示一次，请立即复制保存。</p><p><code>{{.Secret}}</code></p><a href="/ui/?page=tokens">已保存，返回列表</a></section>
+{{end}}
+<p>用于读取公开数据 API，与管理员登录凭据相互独立。</p>
+<div class="table-scroll">
+<table>
+<thead>
+<tr>
+<th>名称 / 标识</th>
+<th>数据源范围</th>
+<th>创建日期（UTC）</th>
+<th>有效期至（UTC）</th>
+<th>状态 / 操作</th>
+</tr>
+</thead>
+<tbody>{{range .Tokens}}
+<tr>
+<td>{{.Name}}<br><code>{{.ID}}</code></td>
+<td>{{range .Sources}}{{.}}<br>{{end}}</td>
+<td>{{.Created.UTC.Format "2006-01-02 15:04"}}</td>
+<td>{{if .Expires}}{{.Expires.UTC.Format "2006-01-02 15:04"}}{{else}}不过期{{end}}</td>
+<td>{{.Status}}{{if not .Revoked}}
+<details>
+<summary>撤销…</summary>
+<p>撤销后将无法发起新的请求。</p>
+<form method="post" action="/ui/tokens/{{.ID}}/revoke"><button>确认撤销</button></form>
+</details>
+{{end}}</td>
+</tr>
+{{else}}
+<tr>
+<td colspan="5">尚未创建 Token。</td>
+</tr>
+{{end}}</tbody>
+</table>
+</div>
+<details>
+<summary>创建 Token</summary>
+<form class="stack" method="post" action="/ui/tokens">
+<label>名称<input name="name" required maxlength="100" autocomplete="off"></label>
+<label>数据源范围
+<select name="sources" multiple required size="4">{{range .Sources}}
+<option value="{{.ID}}">{{.ID}}</option>
+{{end}}</select>
+</label>
+<small>至少选择一个；桌面端按住 Ctrl / Command 可多选。</small>
+<label>过期时间（UTC，可选）<input type="datetime-local" name="expires"></label>
+<p>留空则不过期。Token 明文只在创建后显示一次。</p><button>创建 Token</button>
+</form>
+</details>
+<p>已有 Token 的范围与有效期不可修改，需要调整时重新创建。</p>
+{{else if eq .Page "settings"}}
+<h2>服务设置</h2>
+<h3>Kopia Web UI 反代</h3>
+{{if .KopiaUIProxy}}<p>当前状态：{{if .KopiaUIProxy.Enabled}}启用{{else}}关闭{{end}}。</p>
+<p>启用后通过部署配置的独立端口访问 Kopia Web UI，使用 Kopia 自身的账号登录。</p>
+<form method="post" action="/ui/kopia-ui-proxy">{{if .KopiaUIProxy.Enabled}}<button name="enabled" value="false">关闭反代</button>{{else}}<button name="enabled" value="true">启用反代</button>{{end}}</form>
+{{else}}<p>此部署未配置 Kopia Web UI 反代。</p>{{end}}
+{{end}}
+</main>
+<footer>crawlbox 管理界面 · 时间均为 UTC</footer>
+</body>
 </html>
