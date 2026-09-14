@@ -214,9 +214,25 @@ func (s *Store) Runs(ctx context.Context) ([]model.Run, error) {
 	}
 	return out, rows.Err()
 }
+
+// InterruptRuns runs after snapshot recovery, so a recovered commit wins over
+// a stale running/failed status left by a crash or lost snapshot acknowledgement.
 func (s *Store) InterruptRuns(ctx context.Context) error {
-	_, e := s.DB.ExecContext(ctx, `UPDATE runs SET body=json_set(body,'$.status','interrupted','$.finished',?) WHERE json_extract(body,'$.status') IN ('queued','running','validating','snapshotting','committing')`, time.Now().UTC().Format(time.RFC3339Nano))
-	return e
+	tx, e := s.DB.BeginTx(ctx, nil)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, e = tx.ExecContext(ctx, `UPDATE runs SET body=json_set(body,'$.status','succeeded','$.error','','$.finished',coalesce(json_extract(body,'$.finished'),?)) WHERE json_extract(body,'$.status') != 'succeeded' AND EXISTS (SELECT 1 FROM revisions WHERE json_extract(revisions.body,'$.run')=runs.id AND revisions.source=json_extract(runs.body,'$.source'))`, now)
+	if e != nil {
+		return e
+	}
+	_, e = tx.ExecContext(ctx, `UPDATE runs SET body=json_set(body,'$.status','interrupted','$.finished',?) WHERE json_extract(body,'$.status') IN ('queued','running','validating','snapshotting','committing')`, now)
+	if e != nil {
+		return e
+	}
+	return tx.Commit()
 }
 func (s *Store) CreateToken(ctx context.Context, name string, sources []string, expires *time.Time) (Token, string, error) {
 	t := Token{ID: ID(), Name: strings.TrimSpace(name), Sources: sources, Created: time.Now().UTC(), Expires: expires}

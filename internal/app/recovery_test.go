@@ -7,6 +7,7 @@ import (
 	"github.com/cca2878/crawlbox/internal/catalog"
 	"github.com/cca2878/crawlbox/internal/config"
 	"github.com/cca2878/crawlbox/internal/kopia"
+	"github.com/cca2878/crawlbox/internal/model"
 	rt "github.com/cca2878/crawlbox/internal/runtime"
 	"github.com/cca2878/crawlbox/internal/testutil"
 	"os"
@@ -82,6 +83,7 @@ func TestRecoverSnapshotAfterLostAcknowledgement(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer next.Close()
+	awaitRun(t, s, id, func(r model.Run) bool { return r.Status == "succeeded" && r.Finished != nil })
 	rev, e := s.Revision(context.Background(), "recovery", "latest")
 	if e != nil || rev.Snapshot == "" || len(rev.Files) != 1 {
 		t.Fatalf("recovered %+v %v", rev, e)

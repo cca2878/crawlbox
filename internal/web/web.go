@@ -91,6 +91,7 @@ func (s *Server) Handler() http.Handler {
 		r.Use(http.NewCrossOriginProtection().Handler)
 		r.Get("/", s.ui)
 		r.Post("/sources/{source}/trigger", s.trigger)
+		r.Post("/runs/{run}/cancel", s.cancelRun)
 		r.Post("/tokens", s.createToken)
 		r.Post("/kopia-ui-proxy", s.toggleKopiaUIProxy)
 		r.Post("/tokens/{token}/revoke", s.revoke)
@@ -442,6 +443,15 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, secret string) {
 		}
 	}
 	slices.SortFunc(history, func(a, b model.Revision) int { return b.CreatedAt.Compare(a.CreatedAt) })
+	type runView struct {
+		model.Run
+		CanCancel bool
+		Stopping  bool
+	}
+	runViews := make([]runView, 0, len(runs))
+	for _, run := range runs {
+		runViews = append(runViews, runView{Run: run, CanCancel: s.App.CanCancel(run.ID), Stopping: s.App.CancellationRequested(run.ID)})
+	}
 	tokens, e := s.App.Store.Tokens(r.Context())
 	if e != nil {
 		failure(w)
@@ -462,7 +472,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, secret string) {
 		views = append(views, tokenView{t, status})
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = uiTemplate.Execute(w, map[string]any{"Page": page, "KopiaUIProxy": s.KopiaUIProxy, "Secret": secret, "Sources": sources, "History": history, "Runs": runs, "Tokens": views})
+	_ = uiTemplate.Execute(w, map[string]any{"Page": page, "KopiaUIProxy": s.KopiaUIProxy, "Secret": secret, "Sources": sources, "History": history, "Runs": runViews, "Tokens": views})
 }
 func (s *Server) ui(w http.ResponseWriter, r *http.Request) { s.render(w, r, "") }
 func (s *Server) trigger(w http.ResponseWriter, r *http.Request) {
@@ -577,4 +587,21 @@ func (s *Server) toggleKopiaUIProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/ui/?page=settings", http.StatusSeeOther)
+}
+
+func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request) {
+	err := s.App.Cancel(chi.URLParam(r, "run"))
+	if errors.Is(err, app.ErrRunNotActive) {
+		http.Error(w, "run is no longer active", http.StatusConflict)
+		return
+	}
+	if errors.Is(err, app.ErrRunSealed) {
+		http.Error(w, "run is snapshotting, committing or finishing; cannot cancel", http.StatusConflict)
+		return
+	}
+	if err != nil {
+		failure(w)
+		return
+	}
+	http.Redirect(w, r, "/ui/?page=runs", http.StatusSeeOther)
 }

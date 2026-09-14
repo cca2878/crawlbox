@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/cca2878/crawlbox/internal/config"
+	"github.com/cca2878/crawlbox/internal/fileutil"
 	"github.com/cca2878/crawlbox/internal/wire"
 	extism "github.com/extism/go-sdk"
 	"github.com/gobwas/glob"
@@ -40,13 +41,19 @@ func SafePath(p string) bool {
 }
 func Sum(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 func FileEntry(p, name string) (wire.Entry, error) {
+	return FileEntryContext(context.Background(), p, name)
+}
+func FileEntryContext(ctx context.Context, p, name string) (wire.Entry, error) {
+	if err := ctx.Err(); err != nil {
+		return wire.Entry{}, err
+	}
 	f, e := os.Open(p)
 	if e != nil {
 		return wire.Entry{}, e
 	}
 	defer f.Close()
 	h := sha256.New()
-	n, e := io.Copy(h, f)
+	n, e := io.Copy(h, fileutil.ContextReader{Context: ctx, Reader: f})
 	return wire.Entry{Path: name, Size: n, SHA256: hex.EncodeToString(h.Sum(nil))}, e
 }
 
@@ -307,7 +314,7 @@ func (h *Host) Call(ctx context.Context, q wire.Request) (wire.Response, error) 
 		sort.Strings(paths)
 		r.Entries = []wire.Entry{}
 		for i := q.Offset; i < int64(len(paths)) && len(r.Entries) < limit; i++ {
-			entry, e := FileEntry(filepath.Join(h.Previous, paths[i]), paths[i])
+			entry, e := FileEntryContext(ctx, filepath.Join(h.Previous, paths[i]), paths[i])
 			if e != nil {
 				return r, e
 			}
@@ -378,7 +385,7 @@ func (h *Host) Call(ctx context.Context, q wire.Request) (wire.Response, error) 
 		}
 		return r, e
 	case "stat":
-		v, e := FileEntry(o.Path, "")
+		v, e := FileEntryContext(ctx, o.Path, "")
 		r.Size = v.Size
 		r.SHA256 = v.SHA256
 		return r, e

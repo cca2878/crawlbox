@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/cca2878/crawlbox/internal/catalog"
 	"github.com/cca2878/crawlbox/internal/config"
+	"github.com/cca2878/crawlbox/internal/fileutil"
 	"github.com/cca2878/crawlbox/internal/kopia"
 	"github.com/cca2878/crawlbox/internal/model"
 	rt "github.com/cca2878/crawlbox/internal/runtime"
@@ -28,25 +29,26 @@ type Loaded struct {
 	Wasm       []byte
 }
 type App struct {
-	Config  config.Config
-	Store   *catalog.Store
-	Backend kopia.Backend
-	Sources map[string]Loaded
-	ctx     context.Context
-	cancel  context.CancelFunc
-	mu      sync.Mutex
-	active  map[string]string
-	blocked map[string]bool
-	slots   chan struct{}
-	wg      sync.WaitGroup
-	cron    *cron.Cron
-	entries map[string]cron.EntryID
-	cacheMu sync.Mutex
+	Config     config.Config
+	Store      *catalog.Store
+	Backend    kopia.Backend
+	Sources    map[string]Loaded
+	ctx        context.Context
+	cancel     context.CancelFunc
+	mu         sync.Mutex
+	active     map[string]string
+	blocked    map[string]bool
+	controls   map[string]*runControl
+	slots      chan struct{}
+	wg         sync.WaitGroup
+	cron       *cron.Cron
+	entries    map[string]cron.EntryID
+	cacheSlots map[string]chan struct{}
 }
 
 func New(ctx context.Context, c config.Config, store *catalog.Store, backend kopia.Backend) (*App, error) {
 	ctx, cancel := context.WithCancel(ctx)
-	a := &App{Config: c, Store: store, Backend: backend, Sources: map[string]Loaded{}, ctx: ctx, cancel: cancel, active: map[string]string{}, blocked: map[string]bool{}, slots: make(chan struct{}, c.Parallel), cron: cron.New(), entries: map[string]cron.EntryID{}}
+	a := &App{Config: c, Store: store, Backend: backend, Sources: map[string]Loaded{}, ctx: ctx, cancel: cancel, active: map[string]string{}, blocked: map[string]bool{}, controls: map[string]*runControl{}, cacheSlots: map[string]chan struct{}{}, slots: make(chan struct{}, c.Parallel), cron: cron.New(), entries: map[string]cron.EntryID{}}
 	for _, p := range []string{"staging", "current", "cache"} {
 		if e := os.MkdirAll(filepath.Join(c.DataDir, p), 0700); e != nil {
 			cancel()
@@ -109,7 +111,13 @@ func (a *App) Start() error {
 	}
 	return nil
 }
-func (a *App) Close()                   { a.cancel(); <-a.cron.Stop().Done(); a.wg.Wait() }
+func (a *App) Close() {
+	a.mu.Lock()
+	a.cancel()
+	a.mu.Unlock()
+	<-a.cron.Stop().Done()
+	a.wg.Wait()
+}
 func (a *App) Next(id string) time.Time { return a.cron.Entry(a.entries[id]).Next }
 func (a *App) Trigger(source string) (string, error) {
 	a.mu.Lock()
@@ -130,19 +138,24 @@ func (a *App) Trigger(source string) (string, error) {
 	if e := a.Store.SaveRun(a.ctx, r); e != nil {
 		return "", e
 	}
+	ctx, cancel := context.WithCancelCause(a.ctx)
+	ctx, deadlineCancel := context.WithTimeout(ctx, a.Sources[source].Config.Timeout)
+	control := &runControl{ctx: ctx, cancel: cancel}
+	a.controls[r.ID] = control
 	a.active[source] = r.ID
 	slog.Info("collection queued", "source", source, "run", r.ID)
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
-		defer func() { a.mu.Lock(); delete(a.active, source); a.mu.Unlock() }()
-		a.perform(r)
+		defer deadlineCancel()
+		defer cancel(nil)
+		defer func() { a.mu.Lock(); delete(a.active, source); delete(a.controls, r.ID); a.mu.Unlock() }()
+		a.perform(r, control)
 	}()
 	return r.ID, nil
 }
-func (a *App) perform(r model.Run) {
-	ctx, cancel := context.WithTimeout(a.ctx, a.Sources[r.Source].Config.Timeout)
-	defer cancel()
+func (a *App) perform(r model.Run, control *runControl) {
+	ctx := control.ctx
 	heartbeatDone := make(chan struct{})
 	defer close(heartbeatDone)
 	go func(source, run string, started time.Time) {
@@ -162,8 +175,17 @@ func (a *App) perform(r model.Run) {
 		if p := recover(); p != nil {
 			e = fmt.Errorf("run panic: %v", p)
 		}
+		a.mu.Lock()
+		control.sealed = true
+		if r.Status != "succeeded" && ctx.Err() != nil {
+			e = context.Cause(ctx)
+		}
+		a.mu.Unlock()
 		if e != nil {
 			r.Status = "failed"
+			if errors.Is(ctx.Err(), context.Canceled) {
+				r.Status = "interrupted"
+			}
 			r.Error = e.Error()
 		}
 		now := time.Now().UTC()
@@ -246,7 +268,7 @@ func (a *App) perform(r model.Run) {
 		return
 	}
 	root := filepath.Join(dir, "tree")
-	rev, err := Build(root, previous, prev, candidate)
+	rev, err := build(ctx, root, previous, prev, candidate)
 	if err != nil {
 		e = err
 		return
@@ -266,6 +288,9 @@ func (a *App) perform(r model.Run) {
 		return
 	}
 	if e = writeFile(filepath.Join(root, "revision.json"), b); e != nil {
+		return
+	}
+	if e = a.beginPublication(control); e != nil {
 		return
 	}
 	if e = stage("snapshotting"); e != nil {
@@ -289,6 +314,10 @@ func (a *App) perform(r model.Run) {
 		return
 	}
 	r.Status = "succeeded"
+	// Publication is already durable. Cache failure must not undo the commit.
+	if err := a.installCurrent(ctx, root, rev); err != nil {
+		slog.Warn("current cache promotion failed; next run will restore snapshot", "source", r.Source, "revision", rev.ID, "error", err)
+	}
 	slog.Info("revision committed", "source", r.Source, "run", r.ID, "revision", rev.ID, "files", len(rev.Files), "artifacts", len(rev.Artifacts))
 }
 func (a *App) block(id string) { a.mu.Lock(); a.blocked[id] = true; a.mu.Unlock() }
@@ -306,7 +335,10 @@ func writeFile(p string, b []byte) error {
 	}
 	return ce
 }
-func copyFile(src, dst string) error {
+func copyFile(ctx context.Context, src, dst string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if e := os.MkdirAll(filepath.Dir(dst), 0700); e != nil {
 		return e
 	}
@@ -322,7 +354,7 @@ func copyFile(src, dst string) error {
 	if e != nil {
 		return e
 	}
-	_, e = io.Copy(out, in)
+	_, e = io.Copy(out, fileutil.ContextReader{Context: ctx, Reader: in})
 	ce := out.Close()
 	if e != nil {
 		return e
@@ -330,6 +362,9 @@ func copyFile(src, dst string) error {
 	return ce
 }
 func Build(root, previous string, prev model.Revision, c rt.Candidate) (model.Revision, error) {
+	return build(context.Background(), root, previous, prev, c)
+}
+func build(ctx context.Context, root, previous string, prev model.Revision, c rt.Candidate) (model.Revision, error) {
 	var r model.Revision
 	r.Files = []wire.Entry{}
 	r.Artifacts = []wire.Entry{}
@@ -367,12 +402,26 @@ func Build(root, previous string, prev model.Revision, c rt.Candidate) (model.Re
 			return r, errors.New("invalid candidate path")
 		}
 		dst := filepath.Join(root, "files", filepath.FromSlash(p))
-		if e := copyFile(paths[p], dst); e != nil {
+		if e := copyFile(ctx, paths[p], dst); e != nil {
 			return r, e
 		}
-		entry, e := rt.FileEntry(dst, p)
-		if e != nil {
-			return r, e
+		entry, inherited := old[p]
+		if _, replaced := c.Files[p]; replaced || !inherited {
+			var e error
+			entry, e = rt.FileEntryContext(ctx, dst, p)
+			if e != nil {
+				return r, e
+			}
+		} else {
+			// Host-owned immutable files retain their committed digest. Check
+			// metadata, not all file bytes, when inheriting a previous entry.
+			st, e := os.Lstat(dst)
+			if e != nil {
+				return r, e
+			}
+			if !st.Mode().IsRegular() || st.Size() != entry.Size {
+				return r, errors.New("inherited file metadata mismatch")
+			}
 		}
 		r.Files = append(r.Files, entry)
 		o, ok := old[p]
@@ -396,10 +445,10 @@ func Build(root, previous string, prev model.Revision, c rt.Candidate) (model.Re
 			return r, errors.New("invalid artifact path")
 		}
 		dst := filepath.Join(root, "artifacts", filepath.FromSlash(p))
-		if e := copyFile(c.Artifacts[p], dst); e != nil {
+		if e := copyFile(ctx, c.Artifacts[p], dst); e != nil {
 			return r, e
 		}
-		entry, e := rt.FileEntry(dst, p)
+		entry, e := rt.FileEntryContext(ctx, dst, p)
 		if e != nil {
 			return r, e
 		}
@@ -429,7 +478,7 @@ func diff(old, new []wire.Entry) []model.Change {
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
 }
-func verify(root string, r model.Revision) error {
+func verify(ctx context.Context, root string, r model.Revision) error {
 	for dir, entries := range map[string][]wire.Entry{"files": r.Files, "artifacts": r.Artifacts} {
 		seen := map[string]bool{}
 		for _, f := range entries {
@@ -445,7 +494,7 @@ func verify(root string, r model.Revision) error {
 			if !st.Mode().IsRegular() {
 				return errors.New("nonregular snapshot entry")
 			}
-			got, e := rt.FileEntry(p, f.Path)
+			got, e := rt.FileEntryContext(ctx, p, f.Path)
 			if e != nil {
 				return e
 			}
@@ -456,17 +505,41 @@ func verify(root string, r model.Revision) error {
 	}
 	return nil
 }
+
+// lockCurrent only serializes cache work for the same source.
+func (a *App) lockCurrent(ctx context.Context, source string) (func(), error) {
+	a.mu.Lock()
+	slot := a.cacheSlots[source]
+	if slot == nil {
+		slot = make(chan struct{}, 1)
+		a.cacheSlots[source] = slot
+	}
+	a.mu.Unlock()
+	select {
+	case slot <- struct{}{}:
+		return func() { <-slot }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func (a *App) Current(ctx context.Context, r model.Revision) (string, error) {
-	a.cacheMu.Lock()
-	defer a.cacheMu.Unlock()
+	unlock, err := a.lockCurrent(ctx, r.Source)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
 	dst := filepath.Join(a.Config.DataDir, "current", r.Source)
 	if b, e := os.ReadFile(filepath.Join(dst, "revision.json")); e == nil {
 		var cached model.Revision
 		if json.Unmarshal(b, &cached) == nil && cached.ID == r.ID {
-			if e = verify(dst, r); e == nil {
-				return dst, nil
-			}
+			// The cache is application-owned and was validated before installation.
+			// Integrity scrubbing is not part of each collection check.
+			return dst, ctx.Err()
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	tmp, e := os.MkdirTemp(filepath.Join(a.Config.DataDir, "staging"), "restore-")
 	if e != nil {
@@ -477,20 +550,36 @@ func (a *App) Current(ctx context.Context, r model.Revision) (string, error) {
 	if e = a.Backend.Restore(ctx, r.Snapshot, "", tree); e != nil {
 		return "", e
 	}
-	if e = verify(tree, r); e != nil {
+	if e = verify(ctx, tree, r); e != nil {
 		return "", e
 	}
-	if e = os.RemoveAll(dst); e != nil {
-		return "", e
-	}
-	if e = os.MkdirAll(filepath.Dir(dst), 0700); e != nil {
-		return "", e
-	}
-	if e = os.Rename(tree, dst); e != nil {
+	if e = replaceCurrent(tree, dst); e != nil {
 		return "", e
 	}
 	return dst, nil
 }
+
+func (a *App) installCurrent(ctx context.Context, tree string, r model.Revision) error {
+	unlock, err := a.lockCurrent(ctx, r.Source)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return replaceCurrent(tree, filepath.Join(a.Config.DataDir, "current", r.Source))
+}
+
+// A crash between removal and rename leaves a cache miss, recovered from the
+// committed snapshot. The candidate is never installed before catalog commit.
+func replaceCurrent(tree, dst string) error {
+	if err := os.RemoveAll(dst); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0700); err != nil {
+		return err
+	}
+	return os.Rename(tree, dst)
+}
+
 func (a *App) Recover(ctx context.Context) error {
 	slog.Info("history recovery started")
 	snaps, e := a.Backend.List(ctx)

@@ -79,6 +79,7 @@ footer { border-top:1px solid #ccc; padding-top:1rem; color:#555; font-size:.875
 <p><a href="/ui/?page=runs">查看运行记录与错误详情</a></p>
 {{else if eq .Page "runs"}}
 <h2>运行记录</h2>
+<p>可强制结束排队、采集或验证中的单次任务；清理完成后显示 interrupted。进入快照与提交阶段后不可取消。</p>
 <div class="table-scroll">
 <table>
 <thead>
@@ -93,11 +94,17 @@ footer { border-top:1px solid #ccc; padding-top:1rem; color:#555; font-size:.875
 <tr>
 <td>{{.Started.UTC.Format "2006-01-02 15:04:05"}}</td>
 <td>{{.Source}}</td>
-<td>{{.Status}}</td>
+<td>{{if .Stopping}}正在结束{{else}}{{.Status}}{{end}}</td>
 <td>{{.Progress}}
 <details>
 <summary>{{if .Error}}错误详情{{else}}运行详情{{end}}</summary>
 {{if .Error}}<p>{{.Error}}</p>{{end}}<p>运行 ID：<code>{{.ID}}</code></p>{{if .Finished}}<p>结束时间（UTC）：{{.Finished.UTC.Format "2006-01-02 15:04:05"}}</p>{{end}}</details>
+{{if .CanCancel}}
+<details><summary>强制结束此任务…</summary>
+<p>此次未提交的采集结果将被丢弃。定时调度仍会在下一次触发。</p>
+<form method="post" action="/ui/runs/{{.ID}}/cancel"><button>确认结束</button></form>
+</details>
+{{end}}
 </td>
 </tr>
 {{else}}

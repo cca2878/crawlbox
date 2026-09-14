@@ -48,6 +48,7 @@ func run() int32 {
 		Deletes  []string          `json:"deletes"`
 		NoChange bool              `json:"no_change"`
 		Fail     bool              `json:"fail"`
+		Wait     bool              `json:"wait"`
 	}
 	if e := json.Unmarshal(in.Config, &cfg); e != nil {
 		pdk.SetError(e)
@@ -77,6 +78,11 @@ func run() int32 {
 		if _, e := call(wire.Request{Op: "delete_file", Path: path}); e != nil {
 			pdk.SetError(e)
 			return 1
+		}
+	}
+	if cfg.Wait {
+		_, _ = call(wire.Request{Op: "progress", Data: []byte("fixture waiting")})
+		for {
 		}
 	}
 	if cfg.Fail {

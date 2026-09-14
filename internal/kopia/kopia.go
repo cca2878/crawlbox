@@ -21,6 +21,7 @@ type Snapshot struct {
 		Object string `json:"obj"`
 	} `json:"rootEntry"`
 	Stats struct {
+		CachedFiles  int `json:"cachedFiles"`
 		Errors       int `json:"errorCount"`
 		Ignored      int `json:"ignoredErrorCount"`
 		Excluded     int `json:"excludedFileCount"`
@@ -55,6 +56,7 @@ type CLI struct {
 
 func (c *CLI) command(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, c.Binary, append([]string{"--config-file", c.Config, "--no-progress", "--disable-file-logging"}, args...)...)
+	prepareCommand(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, e := cmd.Output()
@@ -65,7 +67,7 @@ func (c *CLI) command(ctx context.Context, args ...string) ([]byte, error) {
 }
 func (c *CLI) Create(ctx context.Context, dir, source, revision string) (Snapshot, error) {
 	var s Snapshot
-	b, e := c.command(ctx, "snapshot", "create", dir, "--json", "--fail-fast", "--force-hash=100", "--force-disable-actions", "--pin=business", "--tags=app:manager-v1", "--tags=source:"+source, "--tags=revision:"+revision)
+	b, e := c.command(ctx, "snapshot", "create", dir, "--json", "--json-verbose", "--fail-fast", "--override-source=/crawlbox/"+source, "--force-disable-actions", "--pin=business", "--tags=app:manager-v1", "--tags=source:"+source, "--tags=revision:"+revision)
 	if e != nil {
 		return s, e
 	}
@@ -85,7 +87,7 @@ func (c *CLI) Create(ctx context.Context, dir, source, revision string) (Snapsho
 	return s, nil
 }
 func (c *CLI) List(ctx context.Context) ([]Snapshot, error) {
-	b, e := c.command(ctx, "snapshot", "list", "--all", "--show-identical", "--json", "--tags=app:manager-v1")
+	b, e := c.command(ctx, "snapshot", "list", "--all", "--show-identical", "--json", "--json-verbose", "--tags=app:manager-v1")
 	if e != nil {
 		return nil, e
 	}

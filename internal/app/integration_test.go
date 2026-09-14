@@ -73,6 +73,12 @@ func TestLifecycleRecoveryAndAuthorization(t *testing.T) {
 	if r.Status != "succeeded" {
 		t.Fatalf("run %+v", r)
 	}
+	// A committed candidate becomes current immediately, so the next check
+	// does not restore the entire snapshot just to open previous artifacts.
+	cached, err := os.ReadFile(filepath.Join(data, "current", "alpha", "files", "nested", "file.txt"))
+	if err != nil || string(cached) != "first bytes" {
+		t.Fatalf("committed current cache: %q %v", cached, err)
+	}
 	r = wait("beta")
 	if r.Status != "succeeded" {
 		t.Fatalf("run %+v", r)
