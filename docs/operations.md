@@ -29,3 +29,5 @@ Before the plugin starts, the authenticated UI shows revision lookup, current-ca
 Plugin result messages are shown inside the run details for successful or no-change runs. The progress/result column keeps the manager's default final outcome. Empty messages do not add a detail row.
 
 Release images are built on native amd64 and arm64 GitHub runners without QEMU. After both builds succeed, a separate job assembles the versioned multi-platform tags from the digests produced by that workflow run, for both manager and the Kopia wrapper.
+
+The run-history UI lists 20 records per page, newest first, with previous/next links and a total count. Pagination includes records older than the most recent 100. Progress updates retain the same ordering; newly queued runs can shift page boundaries.

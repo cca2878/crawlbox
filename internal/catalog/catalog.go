@@ -195,7 +195,21 @@ func (s *Store) SaveRun(ctx context.Context, r model.Run) error {
 	return e
 }
 func (s *Store) Runs(ctx context.Context) ([]model.Run, error) {
-	rows, e := s.DB.QueryContext(ctx, "SELECT body FROM runs ORDER BY rowid DESC LIMIT 100")
+	return s.RunsPage(ctx, 100, 0)
+}
+
+func (s *Store) RunCount(ctx context.Context) (int, error) {
+	var count int
+	err := s.DB.QueryRowContext(ctx, "SELECT count(*) FROM runs").Scan(&count)
+	return count, err
+}
+
+// RunsPage uses insertion order so progress updates do not move rows between pages.
+func (s *Store) RunsPage(ctx context.Context, limit, offset int) ([]model.Run, error) {
+	if limit < 1 || limit > 100 || offset < 0 {
+		return nil, errors.New("invalid run pagination")
+	}
+	rows, e := s.DB.QueryContext(ctx, "SELECT body FROM runs ORDER BY rowid DESC LIMIT ? OFFSET ?", limit, offset)
 	if e != nil {
 		return nil, e
 	}

@@ -115,6 +115,9 @@ footer { border-top:1px solid #ccc; padding-top:1rem; color:#555; font-size:.875
 {{end}}</tbody>
 </table>
 </div>
+<nav aria-label="运行记录分页">
+<p>{{if .RunPagination.Previous}}<a href="/ui/?page=runs&amp;runs_page={{.RunPagination.Previous}}">上一页</a> · {{end}}第 {{.RunPagination.Number}} / {{.RunPagination.Pages}} 页，共 {{.RunPagination.Total}} 条{{if .RunPagination.Next}} · <a href="/ui/?page=runs&amp;runs_page={{.RunPagination.Next}}">下一页</a>{{end}}</p>
+</nav>
 {{else if eq .Page "revisions"}}
 <h2>版本历史</h2>
 <p>每个数据源最近 20 个已发布版本。完整文件浏览使用 Kopia Web UI。</p>

@@ -439,7 +439,32 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, secret string) {
 		sources = append(sources, src{ID: id, Next: next, Revision: v.ID})
 	}
 	slices.SortFunc(sources, func(a, b src) int { return strings.Compare(a.ID, b.ID) })
-	runs, e := s.App.Store.Runs(r.Context())
+	var runs []model.Run
+	var e error
+	pagination := struct{ Number, Pages, Total, Previous, Next int }{}
+	if page == "runs" {
+		const pageSize = 20
+		pagination.Total, e = s.App.Store.RunCount(r.Context())
+		if e != nil {
+			failure(w)
+			return
+		}
+		pagination.Pages = max(1, (pagination.Total+pageSize-1)/pageSize)
+		number, err := strconv.Atoi(r.URL.Query().Get("runs_page"))
+		if err != nil {
+			number = 1
+		}
+		pagination.Number = min(max(number, 1), pagination.Pages)
+		if pagination.Number > 1 {
+			pagination.Previous = pagination.Number - 1
+		}
+		if pagination.Number < pagination.Pages {
+			pagination.Next = pagination.Number + 1
+		}
+		runs, e = s.App.Store.RunsPage(r.Context(), pageSize, (pagination.Number-1)*pageSize)
+	} else {
+		runs, e = s.App.Store.Runs(r.Context())
+	}
 	if e != nil {
 		failure(w)
 		return
@@ -490,7 +515,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, secret string) {
 		views = append(views, tokenView{t, status})
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = uiTemplate.Execute(w, map[string]any{"Page": page, "KopiaUIProxy": s.KopiaUIProxy, "Secret": secret, "Sources": sources, "History": history, "Runs": runViews, "Tokens": views})
+	_ = uiTemplate.Execute(w, map[string]any{"Page": page, "KopiaUIProxy": s.KopiaUIProxy, "Secret": secret, "Sources": sources, "History": history, "Runs": runViews, "RunPagination": pagination, "Tokens": views})
 }
 func (s *Server) ui(w http.ResponseWriter, r *http.Request) { s.render(w, r, "") }
 func (s *Server) trigger(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"github.com/cca2878/crawlbox/internal/model"
 	"net/http/httptest"
 	"net/url"
@@ -135,5 +136,63 @@ func TestRunMessageEscapingAndOutcomeBoundary(t *testing.T) {
 				t.Fatal("plugin result is not inside run details")
 			}
 		}
+	}
+}
+
+func TestRunHistoryPagination(t *testing.T) {
+	store, err := catalog.Open(filepath.Join(t.TempDir(), "catalog.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	server := &Server{App: &app.App{Store: store}}
+	render := func(query string) string {
+		t.Helper()
+		w := httptest.NewRecorder()
+		server.render(w, httptest.NewRequest("GET", "/ui/?page=runs&runs_page="+query, nil), "")
+		if w.Code != 200 {
+			t.Fatalf("status %d", w.Code)
+		}
+		return w.Body.String()
+	}
+	empty := render("1")
+	if !strings.Contains(empty, "暂无运行记录") || !strings.Contains(empty, "第 1 / 1 页，共 0 条") || strings.Contains(empty, ">下一页</a>") {
+		t.Fatal("incorrect empty pagination")
+	}
+	// Exceed the former 100-record cutoff. Equal timestamps also exercise stable
+	// ordering when an old run receives a status/progress update.
+	started := time.Now()
+	for i := range 105 {
+		run := model.Run{ID: fmt.Sprintf("run-%03d", i), Source: "alpha", Started: started, Status: "succeeded"}
+		if err := store.SaveRun(t.Context(), run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.SaveRun(t.Context(), model.Run{ID: "run-000", Source: "alpha", Started: started, Status: "interrupted"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		query string
+		page  int
+	}{{"", 1}, {"1", 1}, {"2", 2}, {"6", 6}, {"999", 6}, {"-2", 1}, {"invalid", 1}, {"9999999999999999999999999", 1}} {
+		t.Run(tc.query, func(t *testing.T) {
+			body := render(tc.query)
+			if !strings.Contains(body, fmt.Sprintf("第 %d / 6 页，共 105 条", tc.page)) {
+				t.Fatal("incorrect page count")
+			}
+			if strings.Contains(body, ">上一页</a>") != (tc.page > 1) || strings.Contains(body, ">下一页</a>") != (tc.page < 6) {
+				t.Fatal("incorrect navigation")
+			}
+			if tc.page < 6 && !strings.Contains(body, fmt.Sprintf("page=runs&amp;runs_page=%d", tc.page+1)) {
+				t.Fatal("incorrect next page URL")
+			}
+			start, end := (tc.page-1)*20, min(tc.page*20, 105)
+			for i := range 105 {
+				want := 104-i >= start && 104-i < end
+				if strings.Contains(body, fmt.Sprintf("<code>run-%03d</code>", i)) != want {
+					t.Fatalf("wrong page for record %d", i)
+				}
+			}
+		})
 	}
 }
