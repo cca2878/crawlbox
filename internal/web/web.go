@@ -397,15 +397,11 @@ var uiTemplate = template.Must(template.New("ui").Parse(uiHTML))
 // Terminal results take precedence over the last progress event, including
 // for historical records written before this presentation rule existed.
 func runMessage(run model.Run) string {
-	suffix := ""
-	if message := strings.TrimSpace(run.Message); message != "" {
-		suffix = " " + message
-	}
 	switch run.Status {
 	case "succeeded":
-		return "采集成功，已发布新版本。" + suffix
+		return "采集成功，已发布新版本。"
 	case "no_change":
-		return "检查完成，无变化。" + suffix
+		return "检查完成，无变化。"
 	case "failed":
 		return "任务失败，请查看错误详情。"
 	case "interrupted":

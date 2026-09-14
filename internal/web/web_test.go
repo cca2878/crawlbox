@@ -121,9 +121,19 @@ func TestRunMessageEscapingAndOutcomeBoundary(t *testing.T) {
 		if strings.Contains(body, "<script>") {
 			t.Fatal("result interpreted as HTML")
 		}
+		if strings.Contains(runMessage(run), "custom-result") {
+			t.Fatal("plugin message leaked into summary column")
+		}
 		want := status == "succeeded" || status == "no_change"
 		if strings.Contains(body, "&lt;script&gt;custom-result&lt;/script&gt;") != want {
 			t.Fatalf("message exposure for %s", status)
+		}
+		if want {
+			start := strings.Index(body, "<details>")
+			end := strings.Index(body, "</details>")
+			if start < 0 || end < start || !strings.Contains(body[start:end], "插件结果：&lt;script&gt;custom-result&lt;/script&gt;") {
+				t.Fatal("plugin result is not inside run details")
+			}
 		}
 	}
 }

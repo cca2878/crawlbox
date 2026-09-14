@@ -25,3 +25,5 @@ SIGINT/SIGTERM cancel active work and wait for cleanup. SIGKILL cannot run clean
 ## Collection preparation progress
 
 Before the plugin starts, the authenticated UI shows revision lookup, current-cache preparation, a cache hit or Kopia restoration, restored-file verification, cache installation, and plugin startup. Restoration shows the expected total file count (including artifacts), not a downloaded count or percentage. Verification reports completed files at most once every five seconds and at completion. These host-generated updates also appear in info logs with source and run IDs; the one-minute activity heartbeat includes the current phase. Progress reporting does not scan the restore directory or add resource reads. Refresh the UI to see updates. A terminal run displays its final outcome instead of stale progress.
+
+Plugin result messages are shown inside the run details for successful or no-change runs. The progress/result column keeps the manager's default final outcome. Empty messages do not add a detail row.
