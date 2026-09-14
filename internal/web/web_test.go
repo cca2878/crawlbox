@@ -56,6 +56,11 @@ func TestUIPagesAndTokenFlow(t *testing.T) {
 	if err != nil || len(tokens) != 1 {
 		t.Fatalf("tokens: %v %v", tokens, err)
 	}
+	listing := request("GET", "/ui/?page=tokens", "").Body.String()
+	id := tokens[0].ID
+	if !strings.Contains(listing, "<code>"+id[:3]+"***"+id[len(id)-3:]+".***</code>") || strings.Contains(listing, "<code>"+id+"</code>") {
+		t.Fatal("token identifier is not visibly distinguished from a usable token")
+	}
 	w = request("POST", "/ui/tokens/"+tokens[0].ID+"/revoke", "")
 	if w.Code != 303 || w.Header().Get("Location") != "/ui/?page=tokens" {
 		t.Fatalf("revoke: %d %s", w.Code, w.Header().Get("Location"))

@@ -161,7 +161,7 @@ footer { border-top:1px solid #ccc; padding-top:1rem; color:#555; font-size:.875
 <table>
 <thead>
 <tr>
-<th>名称 / 标识</th>
+<th>名称 / Token 标识</th>
 <th>数据源范围</th>
 <th>创建日期（UTC）</th>
 <th>有效期至（UTC）</th>
@@ -170,7 +170,7 @@ footer { border-top:1px solid #ccc; padding-top:1rem; color:#555; font-size:.875
 </thead>
 <tbody>{{range .Tokens}}
 <tr>
-<td>{{.Name}}<br><code>{{.ID}}</code></td>
+<td>{{.Name}}<br><code>{{.DisplayID}}</code></td>
 <td>{{range .Sources}}{{.}}<br>{{end}}</td>
 <td>{{.Created.UTC.Format "2006-01-02 15:04"}}</td>
 <td>{{if .Expires}}{{.Expires.UTC.Format "2006-01-02 15:04"}}{{else}}不过期{{end}}</td>

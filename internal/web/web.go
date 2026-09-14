@@ -502,7 +502,8 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, secret string) {
 	}
 	type tokenView struct {
 		catalog.Token
-		Status string
+		Status    string
+		DisplayID string
 	}
 	views := []tokenView{}
 	for _, t := range tokens {
@@ -512,7 +513,11 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, secret string) {
 		} else if t.Expires != nil && !time.Now().Before(*t.Expires) {
 			status = "expired"
 		}
-		views = append(views, tokenView{t, status})
+		displayID := "***.***"
+		if len(t.ID) > 6 {
+			displayID = t.ID[:3] + "***" + t.ID[len(t.ID)-3:] + ".***"
+		}
+		views = append(views, tokenView{t, status, displayID})
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = uiTemplate.Execute(w, map[string]any{"Page": page, "KopiaUIProxy": s.KopiaUIProxy, "Secret": secret, "Sources": sources, "History": history, "Runs": runViews, "RunPagination": pagination, "Tokens": views})
