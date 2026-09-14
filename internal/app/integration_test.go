@@ -34,7 +34,7 @@ func TestLifecycleRecoveryAndAuthorization(t *testing.T) {
 		t.Fatal(e)
 	}
 	data := t.TempDir()
-	cfg := config.Config{DataDir: data, Credentials: "unused", KopiaConfig: k.Config, Parallel: 1, Sources: []config.Source{{ID: "alpha", Plugin: wasm, SHA256: rt.Sum(b), Config: map[string]any{"files": map[string]string{"nested/file.txt": "first bytes", "removed": "old"}}}, {ID: "beta", Plugin: wasm, SHA256: rt.Sum(b), Config: map[string]any{"files": map[string]string{"secret": "beta bytes"}}}}}
+	cfg := config.Config{DataDir: data, Credentials: "unused", KopiaConfig: k.Config, Parallel: 1, Sources: []config.Source{{ID: "alpha", Plugin: wasm, SHA256: rt.Sum(b), Config: map[string]any{"message": "initial result", "files": map[string]string{"nested/file.txt": "first bytes", "removed": "old"}}}, {ID: "beta", Plugin: wasm, SHA256: rt.Sum(b), Config: map[string]any{"files": map[string]string{"secret": "beta bytes"}}}}}
 	if e = cfg.Validate(); e != nil {
 		t.Fatal(e)
 	}
@@ -70,7 +70,7 @@ func TestLifecycleRecoveryAndAuthorization(t *testing.T) {
 		return model.Run{}
 	}
 	r := wait("alpha")
-	if r.Status != "succeeded" {
+	if r.Status != "succeeded" || r.Message != "initial result" {
 		t.Fatalf("run %+v", r)
 	}
 	// A committed candidate becomes current immediately, so the next check
@@ -88,14 +88,19 @@ func TestLifecycleRecoveryAndAuthorization(t *testing.T) {
 		t.Fatal(e)
 	}
 	loaded := a.Sources["alpha"]
-	loaded.Config.Config = map[string]any{"no_change": true}
+	loaded.Config.Config = map[string]any{"no_change": true, "message": "checked upstream"}
 	a.Sources["alpha"] = loaded
-	if r = wait("alpha"); r.Status != "no_change" {
+	if r = wait("alpha"); r.Status != "no_change" || r.Message != "checked upstream" {
 		t.Fatalf("nochange %+v", r)
 	}
-	loaded.Config.Config = map[string]any{"files": map[string]string{"nested/file.txt": "failed bytes"}, "fail": true}
+	loaded.Config.Config = map[string]any{"no_change": true, "message": strings.Repeat("x", 4097)}
 	a.Sources["alpha"] = loaded
-	if r = wait("alpha"); r.Status != "failed" {
+	if r = wait("alpha"); r.Status != "failed" || r.Message != "" || !strings.Contains(r.Error, "message exceeds") {
+		t.Fatalf("oversized message %+v", r)
+	}
+	loaded.Config.Config = map[string]any{"files": map[string]string{"nested/file.txt": "failed bytes"}, "fail": true, "message": "must not appear"}
+	a.Sources["alpha"] = loaded
+	if r = wait("alpha"); r.Status != "failed" || r.Message != "" {
 		t.Fatalf("failure %+v", r)
 	}
 	head, _ := store.Revision(context.Background(), "alpha", "latest")

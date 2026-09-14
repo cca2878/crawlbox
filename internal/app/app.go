@@ -191,6 +191,9 @@ func (a *App) perform(r model.Run, control *runControl) {
 			}
 			r.Error = e.Error()
 		}
+		if r.Status != "succeeded" && r.Status != "no_change" {
+			r.Message = ""
+		}
 		now := time.Now().UTC()
 		r.Finished = &now
 		if err := a.Store.SaveRun(context.Background(), r); err != nil {
@@ -279,6 +282,7 @@ func (a *App) perform(r model.Run, control *runControl) {
 	}
 	if candidate.Result.Status == "no_change" {
 		r.Status = "no_change"
+		r.Message = candidate.Result.Message
 		return
 	}
 	if e = stage("validating"); e != nil {
@@ -331,6 +335,7 @@ func (a *App) perform(r model.Run, control *runControl) {
 		return
 	}
 	r.Status = "succeeded"
+	r.Message = candidate.Result.Message
 	// Publication is already durable. Cache failure must not undo the commit.
 	if err := a.installCurrent(ctx, root, rev); err != nil {
 		slog.Warn("current cache promotion failed; next run will restore snapshot", "source", r.Source, "revision", rev.ID, "error", err)

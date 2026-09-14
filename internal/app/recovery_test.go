@@ -35,7 +35,7 @@ func TestRecoverSnapshotAfterLostAcknowledgement(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	c := config.Config{DataDir: t.TempDir(), Credentials: "unused", KopiaConfig: k.Config, Sources: []config.Source{{ID: "recovery", Plugin: wasm, SHA256: rt.Sum(b), Config: map[string]any{"files": map[string]string{"a": "committed only in snapshot"}}}}}
+	c := config.Config{DataDir: t.TempDir(), Credentials: "unused", KopiaConfig: k.Config, Sources: []config.Source{{ID: "recovery", Plugin: wasm, SHA256: rt.Sum(b), Config: map[string]any{"message": "must not appear after failed snapshot", "files": map[string]string{"a": "committed only in snapshot"}}}}}
 	if e = c.Validate(); e != nil {
 		t.Fatal(e)
 	}
@@ -60,7 +60,7 @@ func TestRecoverSnapshotAfterLostAcknowledgement(t *testing.T) {
 		}
 		for _, r := range runs {
 			if r.ID == id && r.Finished != nil {
-				if r.Status != "failed" {
+				if r.Status != "failed" || r.Message != "" {
 					t.Fatalf("expected injected failure: %+v", r)
 				}
 				done = true

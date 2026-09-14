@@ -44,6 +44,7 @@ func run() int32 {
 		return 1
 	}
 	var cfg struct {
+		Message  string            `json:"message"`
 		Files    map[string]string `json:"files"`
 		Deletes  []string          `json:"deletes"`
 		NoChange bool              `json:"no_change"`
@@ -55,7 +56,7 @@ func run() int32 {
 		return 1
 	}
 	if cfg.NoChange {
-		_ = pdk.OutputJSON(wire.Result{Status: "no_change"})
+		_ = pdk.OutputJSON(wire.Result{Status: "no_change", Message: cfg.Message})
 		return 0
 	}
 	for path, content := range cfg.Files {
@@ -89,7 +90,7 @@ func run() int32 {
 		pdk.SetError(errors.New("fixture failure after candidate"))
 		return 1
 	}
-	_ = pdk.OutputJSON(wire.Result{Status: "candidate", State: json.RawMessage(`{"cursor":"committed"}`), Metadata: json.RawMessage(`{"version":"fixture-v1"}`)})
+	_ = pdk.OutputJSON(wire.Result{Status: "candidate", Message: cfg.Message, State: json.RawMessage(`{"cursor":"committed"}`), Metadata: json.RawMessage(`{"version":"fixture-v1"}`)})
 	return 0
 }
 func main() {}

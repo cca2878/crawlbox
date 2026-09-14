@@ -521,6 +521,10 @@ func Execute(ctx context.Context, s config.Source, b []byte, in wire.Input, h *H
 	if e = json.Unmarshal(out, &result); e != nil {
 		return Candidate{}, e
 	}
+	if len(result.Message) > 4096 {
+		return Candidate{}, errors.New("plugin result message exceeds 4096 bytes")
+	}
+	result.Message = strings.TrimSpace(result.Message)
 	if result.Status != "candidate" && result.Status != "no_change" {
 		return Candidate{}, errors.New("invalid plugin result")
 	}

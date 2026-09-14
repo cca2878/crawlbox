@@ -21,6 +21,7 @@ type Input struct {
 	PreviousRevision string          `json:"previous_revision"`
 }
 type Result struct {
+	Message  string          `json:"message,omitempty"`
 	Status   string          `json:"status"`
 	Tags     []string        `json:"tags,omitempty"`
 	State    json.RawMessage `json:"state,omitempty"`

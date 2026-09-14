@@ -102,3 +102,28 @@ func TestRunResultReplacesStaleProgress(t *testing.T) {
 		})
 	}
 }
+
+func TestRunMessageEscapingAndOutcomeBoundary(t *testing.T) {
+	store, err := catalog.Open(filepath.Join(t.TempDir(), "catalog.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	server := &Server{App: &app.App{Store: store}}
+	for _, status := range []string{"succeeded", "no_change", "running", "failed", "interrupted"} {
+		run := model.Run{ID: "message", Source: "alpha", Status: status, Started: time.Now(), Message: "<script>custom-result</script>"}
+		if err := store.SaveRun(t.Context(), run); err != nil {
+			t.Fatal(err)
+		}
+		w := httptest.NewRecorder()
+		server.render(w, httptest.NewRequest("GET", "/ui/?page=runs", nil), "")
+		body := w.Body.String()
+		if strings.Contains(body, "<script>") {
+			t.Fatal("result interpreted as HTML")
+		}
+		want := status == "succeeded" || status == "no_change"
+		if strings.Contains(body, "&lt;script&gt;custom-result&lt;/script&gt;") != want {
+			t.Fatalf("message exposure for %s", status)
+		}
+	}
+}

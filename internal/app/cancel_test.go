@@ -51,7 +51,7 @@ func cancelFixture(t *testing.T, backend kopia.Backend) (*app.App, *catalog.Stor
 	}
 	cfg := config.Config{DataDir: t.TempDir(), Credentials: "unused", KopiaConfig: "unused", Parallel: 1, Sources: []config.Source{
 		{ID: "waiting", Plugin: wasm, SHA256: rt.Sum(b), Timeout: time.Minute, Config: map[string]any{"wait": true, "files": map[string]string{"uncommitted": "bytes"}}},
-		{ID: "normal", Plugin: wasm, SHA256: rt.Sum(b), Timeout: time.Minute, Config: map[string]any{"files": map[string]string{"published": "bytes"}}},
+		{ID: "normal", Plugin: wasm, SHA256: rt.Sum(b), Timeout: time.Minute, Config: map[string]any{"message": "publication complete", "files": map[string]string{"published": "bytes"}}},
 	}}
 	if err = cfg.Validate(); err != nil {
 		t.Fatal(err)
@@ -185,6 +185,9 @@ func TestCancelCannotCrossPublication(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatal("snapshot not reached")
 	}
+	if r := awaitRun(t, store, id, func(r model.Run) bool { return r.Status == "snapshotting" }); r.Message != "" {
+		t.Fatal("message published before commit", r)
+	}
 	if a.CanCancel(id) {
 		t.Fatal("snapshot still cancellable")
 	}
@@ -192,7 +195,7 @@ func TestCancelCannotCrossPublication(t *testing.T) {
 		t.Fatal("snapshot cancel accepted", err)
 	}
 	close(backend.release)
-	if r := awaitRun(t, store, id, func(r model.Run) bool { return r.Finished != nil }); r.Status != "succeeded" {
+	if r := awaitRun(t, store, id, func(r model.Run) bool { return r.Finished != nil }); r.Status != "succeeded" || r.Message != "publication complete" {
 		t.Fatal(r)
 	}
 }

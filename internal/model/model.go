@@ -29,6 +29,7 @@ type Revision struct {
 	Snapshot        string          `json:"snapshot,omitempty"`
 }
 type Run struct {
+	Message  string     `json:"message,omitempty"`
 	ID       string     `json:"id"`
 	Source   string     `json:"source"`
 	Status   string     `json:"status"`
