@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -156,6 +157,8 @@ func (a *App) Trigger(source string) (string, error) {
 }
 func (a *App) perform(r model.Run, control *runControl) {
 	ctx := control.ctx
+	var phase atomic.Value
+	phase.Store("等待执行")
 	heartbeatDone := make(chan struct{})
 	defer close(heartbeatDone)
 	go func(source, run string, started time.Time) {
@@ -166,7 +169,7 @@ func (a *App) perform(r model.Run, control *runControl) {
 			case <-heartbeatDone:
 				return
 			case <-ticker.C:
-				slog.Info("collection still active", "source", source, "run", run, "elapsed", time.Since(started))
+				slog.Info("collection still active", "source", source, "run", run, "elapsed", time.Since(started), "phase", phase.Load())
 			}
 		}
 	}(r.Source, r.ID, r.Started)
@@ -211,12 +214,24 @@ func (a *App) perform(r model.Run, control *runControl) {
 	}
 	stage := func(status string) error {
 		r.Status = status
+		phase.Store(status)
 		slog.Info("collection stage", "source", r.Source, "run", r.ID, "stage", status)
 		return a.Store.SaveRun(ctx, r)
 	}
 	if e = stage("running"); e != nil {
 		return
 	}
+	// Only host-generated messages are logged here. Plugin progress may contain
+	// arbitrary business data and retains its existing authenticated UI channel.
+	progress := func(message string) {
+		phase.Store(message)
+		r.Progress = message
+		if err := a.Store.SaveRun(ctx, r); err != nil && ctx.Err() == nil {
+			slog.Warn("could not persist preparation progress", "source", r.Source, "run", r.ID)
+		}
+		slog.Info("collection preparation", "source", r.Source, "run", r.ID, "progress", message)
+	}
+	progress("正在读取上一版信息。")
 	s := a.Sources[r.Source]
 	var prev model.Revision
 	prev, e = a.Store.Revision(ctx, r.Source, "latest")
@@ -226,7 +241,7 @@ func (a *App) perform(r model.Run, control *runControl) {
 	e = nil
 	var previous string
 	if prev.ID != "" {
-		previous, e = a.Current(ctx, prev)
+		previous, e = a.current(ctx, prev, progress)
 		if e != nil {
 			return
 		}
@@ -255,6 +270,8 @@ func (a *App) perform(r model.Run, control *runControl) {
 	defer h.Close()
 	conf, _ := json.Marshal(s.Config.Config)
 	in := wire.Input{ABI: 1, Source: r.Source, Run: r.ID, Config: conf, State: prev.State, PreviousRevision: prev.ID}
+	progress("正在启动采集插件。")
+	phase.Store("插件执行中")
 	candidate, err := rt.Execute(ctx, s.Config, s.Wasm, in, h)
 	if err != nil {
 		e = err
@@ -478,7 +495,15 @@ func diff(old, new []wire.Entry) []model.Change {
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
 }
-func verify(ctx context.Context, root string, r model.Revision) error {
+func verify(ctx context.Context, root string, r model.Revision, progress func(string)) error {
+	total := len(r.Files) + len(r.Artifacts)
+	completed := 0
+	lastReport := time.Now()
+	report := func() {
+		progress(fmt.Sprintf("正在校验恢复后的文件：%d/%d。", completed, total))
+		lastReport = time.Now()
+	}
+	report()
 	for dir, entries := range map[string][]wire.Entry{"files": r.Files, "artifacts": r.Artifacts} {
 		seen := map[string]bool{}
 		for _, f := range entries {
@@ -500,6 +525,10 @@ func verify(ctx context.Context, root string, r model.Revision) error {
 			}
 			if got != f {
 				return errors.New("snapshot content mismatch")
+			}
+			completed++
+			if completed == total || time.Since(lastReport) >= 5*time.Second {
+				report()
 			}
 		}
 	}
@@ -524,6 +553,11 @@ func (a *App) lockCurrent(ctx context.Context, source string) (func(), error) {
 }
 
 func (a *App) Current(ctx context.Context, r model.Revision) (string, error) {
+	return a.current(ctx, r, func(string) {})
+}
+
+func (a *App) current(ctx context.Context, r model.Revision, progress func(string)) (string, error) {
+	progress("正在准备上一版文件树。")
 	unlock, err := a.lockCurrent(ctx, r.Source)
 	if err != nil {
 		return "", err
@@ -535,6 +569,7 @@ func (a *App) Current(ctx context.Context, r model.Revision) (string, error) {
 		if json.Unmarshal(b, &cached) == nil && cached.ID == r.ID {
 			// The cache is application-owned and was validated before installation.
 			// Integrity scrubbing is not part of each collection check.
+			progress("上一版文件树缓存可用，无需恢复。")
 			return dst, ctx.Err()
 		}
 	}
@@ -547,15 +582,18 @@ func (a *App) Current(ctx context.Context, r model.Revision) (string, error) {
 	}
 	defer os.RemoveAll(tmp)
 	tree := filepath.Join(tmp, "tree")
+	progress(fmt.Sprintf("正在从 Kopia 恢复上一版文件树（共 %d 个文件）；恢复完成后将进行校验。", len(r.Files)+len(r.Artifacts)))
 	if e = a.Backend.Restore(ctx, r.Snapshot, "", tree); e != nil {
 		return "", e
 	}
-	if e = verify(ctx, tree, r); e != nil {
+	if e = verify(ctx, tree, r, progress); e != nil {
 		return "", e
 	}
+	progress("校验完成，正在安装上一版文件树缓存。")
 	if e = replaceCurrent(tree, dst); e != nil {
 		return "", e
 	}
+	progress("上一版文件树已就绪。")
 	return dst, nil
 }
 

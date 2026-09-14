@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/cca2878/crawlbox/internal/kopia"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -96,5 +98,96 @@ func TestBuildReusesInheritedDigestAndHashesReplacement(t *testing.T) {
 	}
 	if _, err := Build(t.TempDir(), previous, prev, c); err == nil {
 		t.Fatal("inherited size mismatch accepted")
+	}
+}
+
+// Other backend operations must not be called while preparing current.
+type restoreCallback struct {
+	kopia.Backend
+	restore func(context.Context, string, string, string) error
+}
+
+func (b restoreCallback) Restore(ctx context.Context, id, relative, target string) error {
+	return b.restore(ctx, id, relative, target)
+}
+
+func TestCurrentRestoreProgress(t *testing.T) {
+	for _, outcome := range []string{"success", "corrupt", "cancelled"} {
+		t.Run(outcome, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			data := t.TempDir()
+			if err := os.Mkdir(filepath.Join(data, "staging"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			r := model.Revision{ID: "rev1", Source: "alpha", Snapshot: "snapshot1", Files: []wire.Entry{{Path: "file", Size: 4, SHA256: rt.Sum([]byte("good"))}}}
+			var messages []string
+			report := func(message string) { messages = append(messages, message) }
+			restores := 0
+			backend := restoreCallback{restore: func(ctx context.Context, id, relative, target string) error {
+				restores++
+				// Restore may block for a long time: its stage must already be visible.
+				if !strings.Contains(messages[len(messages)-1], "正在从 Kopia 恢复") {
+					t.Fatal("missing restore progress before I/O")
+				}
+				if id != r.Snapshot || relative != "" {
+					t.Fatal("wrong restore target")
+				}
+				if outcome == "cancelled" {
+					cancel()
+					return ctx.Err()
+				}
+				if err := os.MkdirAll(filepath.Join(target, "files"), 0700); err != nil {
+					return err
+				}
+				content := "good"
+				if outcome == "corrupt" {
+					content = "oops"
+				}
+				if err := os.WriteFile(filepath.Join(target, "files", "file"), []byte(content), 0600); err != nil {
+					return err
+				}
+				b, err := json.Marshal(r)
+				if err != nil {
+					return err
+				}
+				return os.WriteFile(filepath.Join(target, "revision.json"), b, 0600)
+			}}
+			a := &App{Config: config.Config{DataDir: data}, Backend: backend, cacheSlots: map[string]chan struct{}{}}
+			_, err := a.current(ctx, r, report)
+			joined := strings.Join(messages, "\n")
+			if outcome != "success" {
+				if err == nil {
+					t.Fatal("failed restore accepted")
+				}
+				if strings.Contains(joined, "校验完成") || strings.Contains(joined, "已就绪") {
+					t.Fatalf("premature success: %s", joined)
+				}
+				if _, err := os.Stat(filepath.Join(data, "current", "alpha")); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("failed restore installed: %v", err)
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, want := range []string{"共 1 个文件", "0/1", "1/1", "正在安装", "已就绪"} {
+					if !strings.Contains(joined, want) {
+						t.Fatalf("missing %s: %s", want, joined)
+					}
+				}
+				messages = nil
+				if _, err := a.current(ctx, r, report); err != nil {
+					t.Fatal(err)
+				}
+				joined = strings.Join(messages, "\n")
+				if restores != 1 || !strings.Contains(joined, "缓存可用") || strings.Contains(joined, "正在校验") {
+					t.Fatalf("cache hit restored or verified: %s", joined)
+				}
+			}
+			entries, err := os.ReadDir(filepath.Join(data, "staging"))
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("staging not cleaned: %v %v", entries, err)
+			}
+		})
 	}
 }

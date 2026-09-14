@@ -394,6 +394,23 @@ func (s *Server) archive(w http.ResponseWriter, r *http.Request) {
 var uiHTML string
 var uiTemplate = template.Must(template.New("ui").Parse(uiHTML))
 
+// Terminal results take precedence over the last progress event, including
+// for historical records written before this presentation rule existed.
+func runMessage(run model.Run) string {
+	switch run.Status {
+	case "succeeded":
+		return "采集成功，已发布新版本。"
+	case "no_change":
+		return "检查完成，无变化。"
+	case "failed":
+		return "任务失败，请查看错误详情。"
+	case "interrupted":
+		return "任务已中断。"
+	default:
+		return run.Progress
+	}
+}
+
 func (s *Server) render(w http.ResponseWriter, r *http.Request, secret string) {
 	page := r.URL.Query().Get("page")
 	switch page {
@@ -432,7 +449,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, secret string) {
 		for _, run := range runs {
 			if run.Source == sources[i].ID {
 				sources[i].Status = run.Status
-				sources[i].Progress = run.Progress
+				sources[i].Progress = runMessage(run)
 				sources[i].Error = run.Error
 				switch run.Status {
 				case "queued", "running", "validating", "snapshotting", "committing":
@@ -447,10 +464,11 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, secret string) {
 		model.Run
 		CanCancel bool
 		Stopping  bool
+		Message   string
 	}
 	runViews := make([]runView, 0, len(runs))
 	for _, run := range runs {
-		runViews = append(runViews, runView{Run: run, CanCancel: s.App.CanCancel(run.ID), Stopping: s.App.CancellationRequested(run.ID)})
+		runViews = append(runViews, runView{Run: run, Message: runMessage(run), CanCancel: s.App.CanCancel(run.ID), Stopping: s.App.CancellationRequested(run.ID)})
 	}
 	tokens, e := s.App.Store.Tokens(r.Context())
 	if e != nil {

@@ -95,7 +95,7 @@ footer { border-top:1px solid #ccc; padding-top:1rem; color:#555; font-size:.875
 <td>{{.Started.UTC.Format "2006-01-02 15:04:05"}}</td>
 <td>{{.Source}}</td>
 <td>{{if .Stopping}}正在结束{{else}}{{.Status}}{{end}}</td>
-<td>{{.Progress}}
+<td>{{.Message}}
 <details>
 <summary>{{if .Error}}错误详情{{else}}运行详情{{end}}</summary>
 {{if .Error}}<p>{{.Error}}</p>{{end}}<p>运行 ID：<code>{{.ID}}</code></p>{{if .Finished}}<p>结束时间（UTC）：{{.Finished.UTC.Format "2006-01-02 15:04:05"}}</p>{{end}}</details>
