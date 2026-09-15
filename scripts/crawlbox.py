@@ -10,7 +10,7 @@
   python3 crawlbox.py artifact source-b index.db -o index.db
   python3 crawlbox.py archive source-b -r REVISION_ID -o archive.tar.gz
 
-列表和信息输出 JSON，可用 > 保存；files/artifacts 自动翻页。
+列表和信息输出 JSON，可用 > 保存；revisions/files/artifacts 自动翻页。
 -r 默认 latest，支持 revision ID（不是上游版本 tag）。下载覆盖指定输出文件。
 """
 
@@ -151,7 +151,8 @@ def main(argv=None):
     if args.command in ("file", "artifact", "archive"):
         client.download(route, args.output, getattr(args, "byte_range", None), args.command == "archive")
     else:
-        result = client.entries(route) if args.command in ("files", "artifacts") else client.json(route)
+        paginated = ("revisions", "files", "artifacts")
+        result = client.entries(route) if args.command in paginated else client.json(route)
         print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

@@ -5,7 +5,7 @@ Every endpoint requires a Bearer token in the Authorization header. Missing, inv
 | GET path under /api/v1 | Result |
 | --- | --- |
 | /sources | Authorized sources with published data: id and name |
-| /sources/{source}/revisions | Revision summaries |
+| /sources/{source}/revisions | Paginated revision summaries |
 | /sources/{source}/tags | Nonunique tag to revision mappings |
 | /sources/{source}/revisions/{revision}/metadata | ID, parent, source, created_at, plugin ID/version, tags and opaque metadata |
 | /sources/{source}/revisions/{revision}/changes | files and artifacts change arrays; added/modified/deleted with before/after SHA-256 |
@@ -15,7 +15,7 @@ Every endpoint requires a Bearer token in the Authorization header. Missing, inv
 | /sources/{source}/revisions/{revision}/artifacts/{path} | Original artifact bytes; GET/HEAD, ETag and Range |
 | /sources/{source}/revisions/{revision}/archive | tar.gz containing files/ and artifacts/ |
 
-`revision` may be `latest` or an immutable revision ID. File-list pagination uses zero-based offset and limit (1..1000, default 1000); response fields are entries, total and next_offset. Entry fields are path, size and sha256. First revision changes are additions. Version tags are plugin-provided opaque strings and can repeat.
+`revision` may be `latest` or an immutable revision ID. Listings use zero-based offset and limit (1..1000, default 1000); response fields are entries, total and next_offset. This applies to revisions as well as files and artifacts: history accumulates, so no listing returns an unbounded set. Entry fields are path, size and sha256. First revision changes are additions. Version tags are plugin-provided opaque strings and can repeat.
 
 Snapshot IDs, opaque Plugin State, deployment configuration and token records are not included in public summaries. No SQL query API is exposed for database artifacts: clients download their bytes.
 

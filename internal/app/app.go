@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -244,6 +245,10 @@ func (a *App) perform(r model.Run, control *runControl) {
 	e = nil
 	var previous string
 	if prev.ID != "" {
+		phase.Store("核对上一版记录")
+		if e = a.confirmRevision(ctx, prev); e != nil {
+			return
+		}
 		previous, e = a.current(ctx, prev, progress)
 		if e != nil {
 			return
@@ -350,6 +355,68 @@ func (a *App) perform(r model.Run, control *runControl) {
 	}
 	slog.Info("revision committed", "source", r.Source, "run", r.ID, "revision", rev.ID, "files", len(rev.Files), "artifacts", len(rev.Artifacts))
 }
+
+// confirmRevision checks a catalog record against the copy sealed inside its
+// snapshot, immediately before the record is used.
+//
+// The catalog is an index over immutable history, but nothing revisits a record
+// once written: recovery only fills in revisions it lacks. A record that drifted
+// — a management database restored from an older backup, a regression in the
+// write path — would otherwise be inherited into the next revision and sealed
+// into history itself, where it can no longer be corrected. Checking at the
+// moment of use costs one small restore per run and keeps a wrong digest from
+// ever being inherited.
+func (a *App) confirmRevision(ctx context.Context, r model.Revision) error {
+	if r.Snapshot == "" {
+		return errors.New("revision has no snapshot to confirm against")
+	}
+	dir, e := os.MkdirTemp(filepath.Join(a.Config.DataDir, "staging"), "confirm-")
+	if e != nil {
+		return e
+	}
+	defer os.RemoveAll(dir)
+	p := filepath.Join(dir, "revision.json")
+	if e = a.Backend.Restore(ctx, r.Snapshot, "revision.json", p); e != nil {
+		return fmt.Errorf("could not read revision %s from its snapshot: %w", r.ID, e)
+	}
+	b, e := os.ReadFile(p)
+	if e != nil {
+		return e
+	}
+	var sealed model.Revision
+	if e = json.Unmarshal(b, &sealed); e != nil {
+		return e
+	}
+	// The snapshot identifier is recorded only in the catalog, so it is the one
+	// field the sealed copy cannot carry.
+	if sealed.ID != r.ID || sealed.Source != r.Source || sealed.Parent != r.Parent {
+		return fmt.Errorf("catalog record for revision %s does not match its snapshot", r.ID)
+	}
+	if !bytes.Equal(sealed.State, r.State) {
+		return fmt.Errorf("catalog state for revision %s does not match its snapshot", r.ID)
+	}
+	if !sameEntries(sealed.Files, r.Files) || !sameEntries(sealed.Artifacts, r.Artifacts) {
+		return fmt.Errorf("catalog file digests for revision %s do not match its snapshot", r.ID)
+	}
+	return nil
+}
+
+func sameEntries(a, b []wire.Entry) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	index := make(map[string]wire.Entry, len(a))
+	for _, e := range a {
+		index[e.Path] = e
+	}
+	for _, e := range b {
+		if index[e.Path] != e {
+			return false
+		}
+	}
+	return true
+}
+
 func (a *App) block(id string) { a.mu.Lock(); a.blocked[id] = true; a.mu.Unlock() }
 func writeFile(p string, b []byte) error {
 	f, e := os.OpenFile(p, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)

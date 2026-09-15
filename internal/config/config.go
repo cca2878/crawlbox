@@ -44,6 +44,11 @@ type Source struct {
 	StagingBytes     int64          `yaml:"staging_bytes"`
 	StateBytes       int            `yaml:"state_bytes"`
 	DownloadParallel int            `yaml:"download_parallel"`
+	// AllowPrivateTargets permits addresses inside private, loopback or
+	// link-local space. It is off by default: a public name resolving inward is
+	// the shape server-side request forgery takes, and granting a host is about
+	// which upstream may be reached, not about crossing that boundary.
+	AllowPrivateTargets bool `yaml:"allow_private_targets"`
 }
 
 var identifier = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)

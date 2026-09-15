@@ -166,6 +166,34 @@ func (s *Store) Revision(ctx context.Context, source, id string) (model.Revision
 	e = json.Unmarshal([]byte(b), &r)
 	return r, e
 }
+
+// RevisionsPage returns one page of a source's revisions, newest first, with
+// the total. Paging in SQL keeps a single request proportional to the page
+// rather than to accumulated history.
+func (s *Store) RevisionsPage(ctx context.Context, source string, limit, offset int) ([]model.Revision, int, error) {
+	var total int
+	if e := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM revisions WHERE source=?", source).Scan(&total); e != nil {
+		return nil, 0, e
+	}
+	rows, e := s.DB.QueryContext(ctx, "SELECT body FROM revisions WHERE source=? ORDER BY created DESC,id DESC LIMIT ? OFFSET ?", source, limit, offset)
+	if e != nil {
+		return nil, 0, e
+	}
+	defer rows.Close()
+	out := []model.Revision{}
+	for rows.Next() {
+		var b string
+		var r model.Revision
+		if e = rows.Scan(&b); e != nil {
+			return nil, 0, e
+		}
+		if e = json.Unmarshal([]byte(b), &r); e != nil {
+			return nil, 0, e
+		}
+		out = append(out, r)
+	}
+	return out, total, rows.Err()
+}
 func (s *Store) Revisions(ctx context.Context, source string) ([]model.Revision, error) {
 	rows, e := s.DB.QueryContext(ctx, "SELECT body FROM revisions WHERE source=? ORDER BY created DESC,id DESC", source)
 	if e != nil {

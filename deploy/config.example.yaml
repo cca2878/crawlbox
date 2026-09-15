@@ -26,6 +26,10 @@ sources: []
 #   staging_bytes: 107374182400
 #   state_bytes: 1048576
 #   download_parallel: 4
+#   allow_private_targets: false  # permit private, loopback or link-local
+#                                 # addresses. Off by default: granting a host
+#                                 # says which upstream may be reached, not
+#                                 # whether reaching inward is permitted.
 
 # Optional YAML configuration for the separate Kopia Web UI proxy listener.
 # Bundled Compose supplies these values via KOPIA_UI_PROXY_* environment variables;

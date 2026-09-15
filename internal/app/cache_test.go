@@ -191,3 +191,81 @@ func TestCurrentRestoreProgress(t *testing.T) {
 		})
 	}
 }
+
+// sealedBackend serves one revision.json, standing in for the copy inside a
+// snapshot.
+type sealedBackend struct{ sealed model.Revision }
+
+func (b sealedBackend) Create(context.Context, string, string, string) (kopia.Snapshot, error) {
+	return kopia.Snapshot{}, errors.New("not used")
+}
+func (b sealedBackend) List(context.Context) ([]kopia.Snapshot, error) { return nil, nil }
+func (b sealedBackend) Restore(_ context.Context, _, relative, target string) error {
+	if relative != "revision.json" {
+		return errors.New("only the revision record is read")
+	}
+	if e := os.MkdirAll(filepath.Dir(target), 0700); e != nil {
+		return e
+	}
+	raw, e := json.Marshal(b.sealed)
+	if e != nil {
+		return e
+	}
+	return os.WriteFile(target, raw, 0600)
+}
+
+// TestConfirmRevisionDetectsDrift covers the check that runs before a catalog
+// record is used. Nothing revisits a record once written, so a drifted digest
+// would be inherited into the next revision and sealed into history, where it
+// can no longer be corrected.
+func TestConfirmRevisionDetectsDrift(t *testing.T) {
+	sealed := model.Revision{
+		ID: "rev1", Source: "alpha", Parent: "rev0", State: json.RawMessage(`{"cursor":1}`),
+		Files:     []wire.Entry{{Path: "a", Size: 3, SHA256: strings.Repeat("a", 64)}},
+		Artifacts: []wire.Entry{{Path: "index.json", Size: 2, SHA256: strings.Repeat("b", 64)}},
+	}
+	newApp := func() *App {
+		data := t.TempDir()
+		if e := os.MkdirAll(filepath.Join(data, "staging"), 0700); e != nil {
+			t.Fatal(e)
+		}
+		return &App{Config: config.Config{DataDir: data}, Backend: sealedBackend{sealed: sealed},
+			cacheSlots: map[string]chan struct{}{}}
+	}
+	// The catalog copy carries the snapshot identifier, which the sealed copy
+	// cannot: it is assigned after the record is written into the tree.
+	faithful := sealed
+	faithful.Snapshot = "snap1"
+	if e := newApp().confirmRevision(t.Context(), faithful); e != nil {
+		t.Fatalf("a faithful record must pass: %v", e)
+	}
+
+	for name, mutate := range map[string]func(*model.Revision){
+		"file digest": func(r *model.Revision) {
+			r.Files = []wire.Entry{{Path: "a", Size: 3, SHA256: strings.Repeat("c", 64)}}
+		},
+		"artifact digest": func(r *model.Revision) {
+			r.Artifacts = []wire.Entry{{Path: "index.json", Size: 2, SHA256: strings.Repeat("c", 64)}}
+		},
+		"file added": func(r *model.Revision) {
+			r.Files = append(append([]wire.Entry(nil), r.Files...), wire.Entry{Path: "b", Size: 1})
+		},
+		"plugin state": func(r *model.Revision) { r.State = json.RawMessage(`{"cursor":2}`) },
+		"parent":       func(r *model.Revision) { r.Parent = "rev-other" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			drifted := faithful
+			mutate(&drifted)
+			if e := newApp().confirmRevision(t.Context(), drifted); e == nil {
+				t.Fatalf("drift in %s was not detected", name)
+			}
+		})
+	}
+
+	t.Run("no snapshot", func(t *testing.T) {
+		orphan := sealed
+		if e := newApp().confirmRevision(t.Context(), orphan); e == nil {
+			t.Fatal("a record with no snapshot cannot be confirmed")
+		}
+	})
+}

@@ -152,6 +152,11 @@ func TestLifecycleRecoveryAndAuthorization(t *testing.T) {
 		t.Fatal("source leaked")
 	}
 	get("/api/v1/sources/beta/revisions", secret, 404, "")
+	// Listings are bounded: history accumulates, so the response carries a page
+	// and its total rather than everything ever committed.
+	if b = get("/api/v1/sources/alpha/revisions", secret, 200, ""); !bytes.Contains(b, []byte(`"next_offset"`)) || !bytes.Contains(b, []byte(`"total"`)) {
+		t.Fatalf("revision listing is not paginated: %s", b)
+	}
 	if b = get(prefix+first.ID+"/files/nested/file.txt", secret, 200, ""); string(b) != "first bytes" {
 		t.Fatalf("history %s", b)
 	}

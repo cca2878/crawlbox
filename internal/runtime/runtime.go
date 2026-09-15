@@ -125,14 +125,15 @@ func NewHost(s config.Source, d wire.Descriptor, dir string, prev Previous, prog
 		if e != nil {
 			return nil, e
 		}
-		for _, ip := range ips {
-			// This denies a name that resolves inward, which is the shape an
-			// SSRF attempt takes. It is not a ban on internal targets: a
-			// literal address is not resolution, and reaching any target still
-			// requires both the source grant and the descriptor request, so a
-			// deployment can point a source at an internal host deliberately.
-			if (ip.IP.IsPrivate() || ip.IP.IsLoopback() || ip.IP.IsLinkLocalUnicast() || ip.IP.IsUnspecified()) && net.ParseIP(host) == nil && host != "localhost" {
-				return nil, errors.New("private network resolution denied")
+		// Reaching inward requires an explicit grant in the source. A literal
+		// address is not an exemption: writing the address instead of a name
+		// that resolves to it is the same request, so treating one as safe
+		// leaves the check trivially bypassable.
+		if !h.Source.AllowPrivateTargets {
+			for _, ip := range ips {
+				if ip.IP.IsPrivate() || ip.IP.IsLoopback() || ip.IP.IsLinkLocalUnicast() || ip.IP.IsUnspecified() {
+					return nil, errors.New("private network target denied")
+				}
 			}
 		}
 		var last error

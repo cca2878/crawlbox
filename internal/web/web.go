@@ -165,7 +165,11 @@ func (s *Server) sources(w http.ResponseWriter, r *http.Request) {
 	respond(w, out)
 }
 func (s *Server) revisions(w http.ResponseWriter, r *http.Request) {
-	list, e := s.App.Store.Revisions(r.Context(), chi.URLParam(r, "source"))
+	off, lim, ok := pagination(w, r)
+	if !ok {
+		return
+	}
+	list, total, e := s.App.Store.RevisionsPage(r.Context(), chi.URLParam(r, "source"), lim, off)
 	if e != nil {
 		failure(w)
 		return
@@ -174,7 +178,7 @@ func (s *Server) revisions(w http.ResponseWriter, r *http.Request) {
 	for _, v := range list {
 		out = append(out, publicRevision(v))
 	}
-	respond(w, out)
+	respond(w, map[string]any{"entries": out, "total": total, "next_offset": off + len(out)})
 }
 func publicRevision(v model.Revision) map[string]any {
 	return map[string]any{"id": v.ID, "source": v.Source, "parent": v.Parent, "created_at": v.CreatedAt, "metadata": v.Metadata, "tags": v.Tags, "plugin": map[string]string{"id": v.Plugin.ID, "version": v.Plugin.Version}}
@@ -211,26 +215,36 @@ func (s *Server) tags(w http.ResponseWriter, r *http.Request) {
 	}
 	respond(w, out)
 }
-func page(w http.ResponseWriter, r *http.Request, entries []wire.Entry) {
-	off := 0
-	lim := 1000
+
+// pagination reads the shared offset and limit parameters. Every listing is
+// bounded: an unbounded one grows without limit as history accumulates, and
+// the caller has no way to ask for less.
+func pagination(w http.ResponseWriter, r *http.Request) (int, int, bool) {
+	off, lim := 0, 1000
 	var e error
 	if v := r.URL.Query().Get("offset"); v != "" {
 		off, e = strconv.Atoi(v)
 		if e != nil {
 			http.Error(w, "invalid offset", 400)
-			return
+			return 0, 0, false
 		}
 	}
 	if v := r.URL.Query().Get("limit"); v != "" {
 		lim, e = strconv.Atoi(v)
 		if e != nil {
 			http.Error(w, "invalid limit", 400)
-			return
+			return 0, 0, false
 		}
 	}
 	if off < 0 || lim < 1 || lim > 1000 {
 		http.Error(w, "invalid pagination", 400)
+		return 0, 0, false
+	}
+	return off, lim, true
+}
+func page(w http.ResponseWriter, r *http.Request, entries []wire.Entry) {
+	off, lim, ok := pagination(w, r)
+	if !ok {
 		return
 	}
 	if off > len(entries) {

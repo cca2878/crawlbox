@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/cca2878/crawlbox/internal/model"
 	"os"
 	"path/filepath"
@@ -94,4 +95,64 @@ func TestExpiryAndRevisionCommit(t *testing.T) {
 	if e = s.Commit(ctx, r); e != nil {
 		t.Fatal(e)
 	}
+}
+
+// TestRevisionsPagination covers paging in SQL. An unbounded listing grows with
+// accumulated history, so each request must cost the page rather than the
+// whole source.
+func TestRevisionsPagination(t *testing.T) {
+	s, e := Open(filepath.Join(t.TempDir(), "db"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	if e = s.Register(ctx, map[string]string{"one": "fixture"}); e != nil {
+		t.Fatal(e)
+	}
+	base := time.Now().UTC()
+	for i := range 5 {
+		rev := model.Revision{ID: fmt.Sprintf("rev%d", i), Source: "one", CreatedAt: base.Add(time.Duration(i) * time.Minute),
+			Snapshot: fmt.Sprintf("snap%d", i), State: json.RawMessage("null"), Metadata: json.RawMessage("null")}
+		if i > 0 {
+			rev.Parent = fmt.Sprintf("rev%d", i-1)
+		}
+		if e = s.Commit(ctx, rev); e != nil {
+			t.Fatal(e)
+		}
+	}
+	// Newest first, and the total reports the whole source rather than the page.
+	first, total, e := s.RevisionsPage(ctx, "one", 2, 0)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if total != 5 || len(first) != 2 || first[0].ID != "rev4" || first[1].ID != "rev3" {
+		t.Fatalf("first page %+v total=%d", ids(first), total)
+	}
+	next, _, e := s.RevisionsPage(ctx, "one", 2, 2)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if len(next) != 2 || next[0].ID != "rev2" {
+		t.Fatalf("second page %v", ids(next))
+	}
+	past, _, e := s.RevisionsPage(ctx, "one", 2, 5)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if len(past) != 0 {
+		t.Fatalf("offset past the end must be empty: %v", ids(past))
+	}
+	none, total, e := s.RevisionsPage(ctx, "absent", 10, 0)
+	if e != nil || total != 0 || len(none) != 0 {
+		t.Fatalf("unknown source %v %d %v", ids(none), total, e)
+	}
+}
+
+func ids(list []model.Revision) []string {
+	out := []string{}
+	for _, r := range list {
+		out = append(out, r.ID)
+	}
+	return out
 }

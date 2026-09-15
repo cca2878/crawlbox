@@ -27,7 +27,7 @@ func TestRangedResponseHeaders(t *testing.T) {
 	}))
 	defer srv.Close()
 	u, _ := url.Parse(srv.URL)
-	h := NewHost(config.Source{Hosts: []string{u.Host}, StagingBytes: 1024, DownloadParallel: 1},
+	h := NewHost(config.Source{Hosts: []string{u.Host}, AllowPrivateTargets: true, StagingBytes: 1024, DownloadParallel: 1},
 		wire.Descriptor{Hosts: []string{"127.0.0.1"}}, t.TempDir(), Previous{}, nil)
 	defer h.Close()
 	r, e := h.Call(context.Background(), wire.Request{Op: "http", URL: srv.URL,
@@ -63,7 +63,7 @@ func TestResponseHeaderCaps(t *testing.T) {
 	}))
 	defer srv.Close()
 	u, _ := url.Parse(srv.URL)
-	h := NewHost(config.Source{Hosts: []string{u.Host}, StagingBytes: 1024, DownloadParallel: 1},
+	h := NewHost(config.Source{Hosts: []string{u.Host}, AllowPrivateTargets: true, StagingBytes: 1024, DownloadParallel: 1},
 		wire.Descriptor{Hosts: []string{"127.0.0.1"}}, t.TempDir(), Previous{}, nil)
 	defer h.Close()
 	r, e := h.Call(context.Background(), wire.Request{Op: "http", URL: srv.URL})
@@ -85,7 +85,7 @@ func TestHostConfinementAndQuota(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("oversized")) }))
 	defer srv.Close()
 	u, _ := url.Parse(srv.URL)
-	h := NewHost(config.Source{Hosts: []string{u.Host}, StagingBytes: 4, DownloadParallel: 1}, wire.Descriptor{Hosts: []string{"127.0.0.1"}}, t.TempDir(), Previous{}, nil)
+	h := NewHost(config.Source{Hosts: []string{u.Host}, AllowPrivateTargets: true, StagingBytes: 4, DownloadParallel: 1}, wire.Descriptor{Hosts: []string{"127.0.0.1"}}, t.TempDir(), Previous{}, nil)
 	defer h.Close()
 	for _, p := range []string{"../x", "/x", "a/../b", "a\\b", ".", "a//b"} {
 		if SafePath(p) {
@@ -106,7 +106,7 @@ func TestHostConfinementAndQuota(t *testing.T) {
 	}
 }
 func TestSealedObjectsAndConflicts(t *testing.T) {
-	h := NewHost(config.Source{StagingBytes: 1024, DownloadParallel: 1}, wire.Descriptor{}, t.TempDir(), Previous{}, nil)
+	h := NewHost(config.Source{AllowPrivateTargets: true, StagingBytes: 1024, DownloadParallel: 1}, wire.Descriptor{}, t.TempDir(), Previous{}, nil)
 	defer h.Close()
 	ctx := context.Background()
 	r, e := h.Call(ctx, wire.Request{Op: "create"})
@@ -148,7 +148,7 @@ func TestInheritedMetadataComesFromCatalog(t *testing.T) {
 		t.Fatal(e)
 	}
 	committed := wire.Entry{Path: "a.txt", Size: int64(len(body)), SHA256: strings.Repeat("c", 64)}
-	h := NewHost(config.Source{StagingBytes: 1024, DownloadParallel: 1}, wire.Descriptor{}, dir,
+	h := NewHost(config.Source{AllowPrivateTargets: true, StagingBytes: 1024, DownloadParallel: 1}, wire.Descriptor{}, dir,
 		Previous{Files: files, Entries: []wire.Entry{committed}}, nil)
 	defer h.Close()
 	ctx := context.Background()
@@ -197,7 +197,7 @@ func TestInheritedPagination(t *testing.T) {
 	for _, name := range []string{"c", "a", "b"} {
 		entries = append(entries, wire.Entry{Path: name, Size: 1, SHA256: strings.Repeat(name, 64)})
 	}
-	h := NewHost(config.Source{StagingBytes: 1, DownloadParallel: 1}, wire.Descriptor{}, t.TempDir(),
+	h := NewHost(config.Source{AllowPrivateTargets: true, StagingBytes: 1, DownloadParallel: 1}, wire.Descriptor{}, t.TempDir(),
 		Previous{Files: t.TempDir(), Entries: entries}, nil)
 	defer h.Close()
 	r, e := h.Call(context.Background(), wire.Request{Op: "list_files", Offset: 1, Limit: 1})
@@ -207,5 +207,36 @@ func TestInheritedPagination(t *testing.T) {
 	// Entries are served in path order regardless of how they arrived.
 	if len(r.Entries) != 1 || r.Entries[0].Path != "b" {
 		t.Fatalf("pagination over sorted entries: %+v", r.Entries)
+	}
+}
+
+// TestPrivateTargetsNeedAnExplicitGrant pins the boundary as a boundary. A
+// literal address is not an exemption: writing 127.0.0.1 instead of a name that
+// resolves to it is the same request, so a check that trusts the literal form
+// can be stepped around by anyone who can choose the URL.
+func TestPrivateTargetsNeedAnExplicitGrant(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("reached"))
+	}))
+	defer srv.Close()
+	u, _ := url.Parse(srv.URL)
+	grant := config.Source{Hosts: []string{u.Host}, StagingBytes: 1024, DownloadParallel: 1}
+	desc := wire.Descriptor{Hosts: []string{"127.0.0.1"}}
+
+	// Granting the host authorises which upstream may be reached; it does not
+	// authorise reaching inward.
+	denied := NewHost(grant, desc, t.TempDir(), Previous{}, nil)
+	defer denied.Close()
+	if _, e := denied.Call(context.Background(), wire.Request{Op: "http", URL: srv.URL}); e == nil {
+		t.Fatal("a literal private address was reached without an explicit grant")
+	}
+
+	allowed := grant
+	allowed.AllowPrivateTargets = true
+	h := NewHost(allowed, desc, t.TempDir(), Previous{}, nil)
+	defer h.Close()
+	r, e := h.Call(context.Background(), wire.Request{Op: "http", URL: srv.URL})
+	if e != nil || r.Status != http.StatusOK {
+		t.Fatalf("an explicit grant must permit the target: %v %+v", e, r)
 	}
 }
