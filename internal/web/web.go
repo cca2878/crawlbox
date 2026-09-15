@@ -19,6 +19,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"html/template"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -387,7 +388,12 @@ func (s *Server) archive(w http.ResponseWriter, r *http.Request) {
 	if e = f.Close(); e != nil {
 		return
 	}
-	_ = os.Rename(filepath.Join(tmp, "archive.tar.gz"), p)
+	if e := os.Rename(filepath.Join(tmp, "archive.tar.gz"), p); e != nil {
+		// The archive already reached the client; only the cache entry is
+		// lost. Persistent failures would otherwise rebuild it every request
+		// with no indication of why.
+		slog.Warn("could not publish archive cache entry", "path", p, "error", e)
+	}
 }
 
 //go:embed ui.html

@@ -259,14 +259,22 @@ func (a *App) perform(r model.Run, control *runControl) {
 	if e = os.MkdirAll(objects, 0700); e != nil {
 		return
 	}
-	art := ""
-	files := ""
+	inherited := rt.Previous{Entries: prev.Files, ArtifactEntries: prev.Artifacts}
 	if previous != "" {
-		art = filepath.Join(previous, "artifacts")
-		files = filepath.Join(previous, "files")
+		inherited.Artifacts = filepath.Join(previous, "artifacts")
+		inherited.Files = filepath.Join(previous, "files")
 	}
-	h := rt.NewHost(s.Config, s.Descriptor, objects, files, art, func(p string) {
+	// Plugin progress is throttled like the host's own reporting. A plugin may
+	// report per item, and persisting each one would turn a large collection
+	// into thousands of database writes. The final status write carries the
+	// last value, so nothing is lost by skipping intermediate saves.
+	lastProgress := time.Time{}
+	h := rt.NewHost(s.Config, s.Descriptor, objects, inherited, func(p string) {
 		r.Progress = p
+		if time.Since(lastProgress) < 5*time.Second {
+			return
+		}
+		lastProgress = time.Now()
 		_ = a.Store.SaveRun(ctx, r)
 		slog.Debug("plugin progress updated", "source", r.Source, "run", r.ID)
 	})

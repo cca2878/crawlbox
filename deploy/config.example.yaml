@@ -16,6 +16,9 @@ sources: []
 #   sha256: <actual SHA-256 of plugin.wasm>
 #   config: {}  # validated by the plugin's schema and validate_config export
 #   hosts: [downloads.example.com]
+#   # Exact host, matched against the URL host including a nonstandard port
+#   # (example.com:8443); no wildcards. A plugin declares its own host patterns,
+#   # where * covers a single label; effective access is the intersection.
 #   schedule: "*/30 * * * *"
 #   timezone: UTC
 #   timeout: 2h

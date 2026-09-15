@@ -60,6 +60,21 @@ func FileEntryContext(ctx context.Context, p, name string) (wire.Entry, error) {
 type Object struct {
 	Path   string
 	Sealed bool
+	// Entry carries the committed metadata of an object opened from the
+	// previous revision. The catalog already holds that digest, so answering
+	// stat from it avoids reading the bytes again.
+	Entry *wire.Entry
+}
+
+// Previous describes the committed revision a run inherits from: where its
+// bytes live, and what the catalog already recorded about them. Passing the
+// committed entries keeps the host from re-deriving metadata the manager has
+// stored, which for a large tree means reading every byte.
+type Previous struct {
+	Files           string
+	Artifacts       string
+	Entries         []wire.Entry
+	ArtifactEntries []wire.Entry
 }
 type Candidate struct {
 	Files     map[string]string
@@ -74,6 +89,9 @@ type Host struct {
 	Previous          string
 	PreviousArtifacts string
 	Progress          func(string)
+	entries           []wire.Entry
+	index             map[string]wire.Entry
+	artifactIndex     map[string]wire.Entry
 	mu                sync.Mutex
 	objects           map[string]*Object
 	used              int64
@@ -82,8 +100,19 @@ type Host struct {
 	slots             chan struct{}
 }
 
-func NewHost(s config.Source, d wire.Descriptor, dir, previous, artifacts string, progress func(string)) *Host {
-	h := &Host{Source: s, Descriptor: d, Dir: dir, Previous: previous, PreviousArtifacts: artifacts, Progress: progress, objects: map[string]*Object{}, candidate: Candidate{Files: map[string]string{}, Artifacts: map[string]string{}, Deletes: map[string]bool{}}, slots: make(chan struct{}, s.DownloadParallel)}
+// Response header caps bound the JSON a hostile upstream can make the host
+// build. They are not a confidentiality boundary.
+const (
+	maxResponseHeaders     = 64
+	maxResponseHeaderBytes = 8 << 10
+)
+
+func NewHost(s config.Source, d wire.Descriptor, dir string, prev Previous, progress func(string)) *Host {
+	h := &Host{Source: s, Descriptor: d, Dir: dir, Previous: prev.Files, PreviousArtifacts: prev.Artifacts, Progress: progress, objects: map[string]*Object{}, candidate: Candidate{Files: map[string]string{}, Artifacts: map[string]string{}, Deletes: map[string]bool{}}, slots: make(chan struct{}, s.DownloadParallel)}
+	h.entries = append([]wire.Entry(nil), prev.Entries...)
+	sort.Slice(h.entries, func(i, j int) bool { return h.entries[i].Path < h.entries[j].Path })
+	h.index = index(prev.Entries)
+	h.artifactIndex = index(prev.ArtifactEntries)
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.Proxy = nil
 	tr.ResponseHeaderTimeout = 30 * time.Second
@@ -97,6 +126,11 @@ func NewHost(s config.Source, d wire.Descriptor, dir, previous, artifacts string
 			return nil, e
 		}
 		for _, ip := range ips {
+			// This denies a name that resolves inward, which is the shape an
+			// SSRF attempt takes. It is not a ban on internal targets: a
+			// literal address is not resolution, and reaching any target still
+			// requires both the source grant and the descriptor request, so a
+			// deployment can point a source at an internal host deliberately.
 			if (ip.IP.IsPrivate() || ip.IP.IsLoopback() || ip.IP.IsLinkLocalUnicast() || ip.IP.IsUnspecified()) && net.ParseIP(host) == nil && host != "localhost" {
 				return nil, errors.New("private network resolution denied")
 			}
@@ -126,6 +160,13 @@ func NewHost(s config.Source, d wire.Descriptor, dir, previous, artifacts string
 	}}
 	return h
 }
+func index(entries []wire.Entry) map[string]wire.Entry {
+	m := make(map[string]wire.Entry, len(entries))
+	for _, e := range entries {
+		m[e.Path] = e
+	}
+	return m
+}
 func (h *Host) Close() { h.client.CloseIdleConnections() }
 func (h *Host) allow(u *url.URL) error {
 	if (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.Host == "" {
@@ -139,7 +180,10 @@ func (h *Host) allow(u *url.URL) error {
 	}
 	request := false
 	for _, v := range h.Descriptor.Hosts {
-		g, e := glob.Compile(v)
+		// '.' is a separator, so a wildcard covers one label rather than an
+		// arbitrary depth: *.example.com requests api.example.com and not
+		// a.b.example.com, keeping the requested surface as narrow as it reads.
+		g, e := glob.Compile(v, '.')
 		if e == nil && (g.Match(u.Host) || g.Match(u.Hostname())) {
 			request = true
 		}
@@ -247,9 +291,30 @@ func (h *Host) Call(ctx context.Context, q wire.Request) (wire.Response, error) 
 		r.Handle = id
 		r.Size = n
 		r.Status = resp.StatusCode
-		r.Headers = map[string]string{}
-		for _, k := range []string{"Content-Type", "ETag", "Last-Modified", "Retry-After"} {
-			r.Headers[k] = resp.Header.Get(k)
+		// Response headers reach the plugin in full. Selecting them by name
+		// would make each new request style need a Manager change, which the
+		// architecture rejects: a ranged request is ordinary HTTP, yet its
+		// Content-Range is the only place a partial response states the full
+		// size. Withholding headers protects nothing either, because the
+		// plugin already reads the whole body, it chooses the request headers
+		// itself, and the upstream never sees Manager state. The caps below
+		// are resource protection, like the staging quota, and names are
+		// ordered so truncation is deterministic.
+		names := make([]string, 0, len(resp.Header))
+		for k := range resp.Header {
+			names = append(names, k)
+		}
+		sort.Strings(names)
+		r.Headers = make(map[string]string, min(len(names), maxResponseHeaders))
+		for _, k := range names {
+			if len(r.Headers) >= maxResponseHeaders {
+				break
+			}
+			v := resp.Header.Get(k)
+			if len(v) > maxResponseHeaderBytes {
+				v = v[:maxResponseHeaderBytes]
+			}
+			r.Headers[k] = v
 		}
 		return r, nil
 	case "create":
@@ -275,9 +340,17 @@ func (h *Host) Call(ctx context.Context, q wire.Request) (wire.Response, error) 
 		if !st.Mode().IsRegular() {
 			return r, errors.New("not regular file")
 		}
+		known := h.index
+		if q.Op == "previous_artifact" {
+			known = h.artifactIndex
+		}
+		o := &Object{Path: p, Sealed: true}
+		if committed, ok := known[q.Path]; ok && committed.Size == st.Size() {
+			o.Entry = &committed
+		}
 		h.mu.Lock()
 		id := fmt.Sprintf("previous-%d", len(h.objects))
-		h.objects[id] = &Object{Path: p, Sealed: true}
+		h.objects[id] = o
 		h.mu.Unlock()
 		r.Handle = id
 		r.Size = st.Size()
@@ -290,35 +363,12 @@ func (h *Host) Call(ctx context.Context, q wire.Request) (wire.Response, error) 
 		if limit == 0 {
 			limit = 1000
 		}
-		if h.Previous == "" {
-			r.Entries = []wire.Entry{}
-			return r, nil
-		}
-		var paths []string
-		e := filepath.WalkDir(h.Previous, func(p string, d os.DirEntry, e error) error {
-			if e != nil {
-				return e
-			}
-			if d.Type().IsRegular() {
-				rel, e := filepath.Rel(h.Previous, p)
-				if e != nil {
-					return e
-				}
-				paths = append(paths, filepath.ToSlash(rel))
-			}
-			return nil
-		})
-		if e != nil {
-			return r, e
-		}
-		sort.Strings(paths)
+		// The committed entries already describe this view, digests included.
+		// Walking the tree to hash it again would read every byte to rebuild
+		// what the catalog stored when the revision was published.
 		r.Entries = []wire.Entry{}
-		for i := q.Offset; i < int64(len(paths)) && len(r.Entries) < limit; i++ {
-			entry, e := FileEntryContext(ctx, filepath.Join(h.Previous, paths[i]), paths[i])
-			if e != nil {
-				return r, e
-			}
-			r.Entries = append(r.Entries, entry)
+		for i := q.Offset; i < int64(len(h.entries)) && len(r.Entries) < limit; i++ {
+			r.Entries = append(r.Entries, h.entries[i])
 		}
 		return r, nil
 	case "delete_file":
@@ -385,6 +435,10 @@ func (h *Host) Call(ctx context.Context, q wire.Request) (wire.Response, error) 
 		}
 		return r, e
 	case "stat":
+		if o.Entry != nil {
+			r.Size, r.SHA256 = o.Entry.Size, o.Entry.SHA256
+			return r, nil
+		}
 		v, e := FileEntryContext(ctx, o.Path, "")
 		r.Size = v.Size
 		r.SHA256 = v.SHA256
